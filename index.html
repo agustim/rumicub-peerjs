@@ -156,7 +156,53 @@ function validGroup(arr){
   return reals.length+(arr.length-reals.length)<=4;
 }
 function validMeld(arr){ return Array.isArray(arr)&&arr.length>=3&&(validGroup(arr)||validRun(arr)); }
-function meldScore(m){ return m.reduce((s,t)=>s+(t.joker?0:t.v),0); }
+
+/* Valors efectius d'un meld: el comodí comptabilitza pel número que representa.
+   - Grup: el comodí val el número del grup (13,13,comodí → 39, no 26).
+   - Escala: el comodí val el número que completa l'escala (8,9,comodí → 10). */
+function meldValues(m){
+  const reals=m.filter(t=>!t.joker);
+  if(reals.length===0) return m.map(()=>0);
+  if(validGroup(m)){
+    const v=reals[0].v;
+    return m.map(t=>t.joker?v:t.v);
+  }
+  // Escala: extrapola el valor de cada comodí a partir dels veïns reals
+  const L=m.length;
+  const vs=m.map(t=>t.joker?null:t.v);
+  for(let i=0;i<L;i++){
+    if(vs[i]===null){
+      let lv=null; for(let j=i-1;j>=0;j--){ if(vs[j]!==null){ lv=vs[j]+(i-j); break; } }
+      let rv=null; for(let j=i+1;j<L;j++){ if(vs[j]!==null){ rv=vs[j]-(j-i); break; } }
+      vs[i]=(lv!==null)?lv:((rv!==null)?rv:1);
+    }
+  }
+  // Seguretat: si l'extrapolació surt de 1..13, recol·loca el bloc consecutiu factible
+  if(vs.some(v=>v<1||v>13)){
+    const maxV=Math.max(...reals.map(t=>t.v));
+    const start=Math.max(1, maxV-(L-1));
+    const realSet=new Set(reals.map(t=>t.v));
+    let s=start; const out=[];
+    for(const t of m){ if(!t.joker){ out.push(t.v); } else { while(realSet.has(s)) s++; out.push(s); s++; } }
+    return out;
+  }
+  return vs;
+}
+function meldScore(m){ return meldValues(m).reduce((a,b)=>a+b,0); }
+
+/* Ordre de presentació d'un meld (només visual, no toca l'estat):
+   - Escala: ordenada per valor efectiu (el comodí es col·loca al lloc que representa).
+   - Grup: ordenat per colors. */
+function displayOrder(m){
+  try{
+    if(validGroup(m)) return [...m].sort((a,b)=>(a.joker?99:a.c)-(b.joker?99:b.c));
+    if(validRun(m)){
+      const vals=meldValues(m);
+      return m.map((t,i)=>({t,v:vals[i]})).sort((a,b)=>a.v-b.v).map(x=>x.t);
+    }
+  }catch(_){}
+  return m;
+}
 
 /* Partir una selecció de fitxes en combinacions vàlides (o null) */
 function bestPartition(tiles){
@@ -458,7 +504,7 @@ function render(){
   G.table.forEach((m,i)=>{
     h+=`<div class="meld${selMeld===i?' mSel':''}" onclick="clickMeld(${i})">`+
        `<div class="meldHead">Grup ${i+1}</div>`+
-       m.map(t=>tileHtml(t,false)).join('')+'</div>';
+       displayOrder(m).map(t=>tileHtml(t,false)).join('')+'</div>';
   });
   tableEl.innerHTML=h;
   // notificació de la pila

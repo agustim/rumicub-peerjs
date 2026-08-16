@@ -23,7 +23,8 @@ No cal registrar-se, no hi ha comptes ni servidor de partides.
 - Baralla completa: 106 fitxes (2 baralles de 52 + 2 comodins).
 - Jugada inicial obligatòria de **30 punts** (només amb fitxes pròpies).
 - Combinacions vàlides: escales del mateix color i grups de 3-4 del mateix número.
-- El comodí substitueix qualsevol fitxa.
+- El comodí substitueix qualsevol fitxa i, per a la jugada inicial, compta pel
+  valor que representa (ex: grup 13,13,comodí = 39 punts).
 - Guanya qui buida la mà primer.
 - Accions per torn: **▶ Jugar** (fitxes seleccionades, opcionalment afegides a un
   grup del tauler), **⬇ Agafar de la pila** o **➡ Passar**.
