@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Rummikub P2P — 2 jugadors</title>
+<!--
+  ═══ CONFIGURACIÓ DE PRIVADESA ═══
+  Per defecte, la senyalització fa servir el servidor públic de PeerJS (0.peerjs.com),
+  però la partida VAIX P2P i xifrada entre els dos dispositius.
+  Per a tot 100% local/privat:
+    1) Habitual:  npm install -g peer      (o: npm i peerjs-server)
+          inicia: peerjs --port 9000 --key peerjs
+    2) Sobtotaix línia <script> del CDN pel fitxer local, ex: deixa baixat
+          peerjs.min.js al mateix directori i posa:  <script src="peerjs.min.js">
+    3) Posau la IP del miniPC a CONFIG aquí a sota.
+-->
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script>
+// Si allotgeu el vostre PeerServer, posau aquí les seves dades:
+const CONFIG = { host: undefined, port: undefined, key: 'peerjs', secure: false };
+</script>
+<style>
+  *{box-sizing:border-box;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;}
+  body{margin:0;background:#123a20;color:#f2f5f0;padding:12px;
+       user-select:none;-webkit-user-select:none;max-width:900px;margin:0 auto;}
+  h1{font-size:22px;margin:6px 0;text-align:center;}
+  .card{background:#1d5c30;border-radius:16px;padding:12px;margin:10px 0;
+        box-shadow:0 3px 8px rgba(0,0,0,.35);}
+  .bigmsg{font-size:20px;font-weight:700;text-align:center;min-height:28px;margin:6px 0;}
+  button{font-size:19px;padding:14px 16px;border-radius:12px;border:none;
+         background:#2f6fe0;color:#fff;cursor:pointer;margin:4px;font-weight:600;}
+  button:disabled{opacity:.35;cursor:default;}
+  .danger{background:#b3402c;} .ok{background:#2e9e4f;}
+  input{font-size:22px;padding:12px;border-radius:10px;border:none;text-align:center;
+        width:140px;letter-spacing:6px;text-transform:uppercase;}
+  #connInfo{font-size:17px;text-align:center;margin-bottom:8px;}
+  #log{font-size:15px;color:#d9f0df;min-height:20px;margin:6px 0;text-align:center;}
+  .tile{width:46px;height:64px;line-height:58px;border-radius:9px;border:2px solid #fff;
+        display:inline-flex;align-items:center;justify-content:center;
+        font-size:22px;font-weight:800;margin:3px;background:#fff;color:#222;
+        box-shadow:0 3px 5px rgba(0,0,0,.45);transition:transform .08s;}
+  .tile.c0{background:#ffe3de;color:#c0392b;}
+  .tile.c1{background:#deebff;color:#1f5ecf;}
+  .tile.c2{background:#fff3d1;color:#a67c00;}
+  .tile.c3{background:#f0f0f0;color:#111;}
+  .tile.joker{background:#161616;color:#ffd23f;font-size:26px;}
+  .tile.sel{outline:4px solid #ffd23f;transform:translateY(-6px);}
+  .meld{border:3px dashed rgba(255,255,255,.28);border-radius:12px;padding:4px 4px 2px;
+        display:inline-block;margin:5px;background:rgba(0,0,0,.15);vertical-align:top;}
+  .meld.mSel{border-color:#ffd23f;background:rgba(255,210,63,.16);}
+  .meldHead{font-size:12px;text-align:center;color:#cfe8d6;padding:2px;}
+  #table{white-space:nowrap;overflow-x:auto;min-height:96px;padding:4px 2px;}
+  #rack{white-space:normal;min-height:84px;padding:6px;background:rgba(0,0,0,.22);
+        border-radius:14px;}
+  .row{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;}
+  .lbl{font-size:15px;font-weight:700;margin:8px 0 4px;}
+  .dim{opacity:.45;}
+  .turn-me{color:#ffd23f;} .turn-not{color:#cfe8d6;}
+</style>
+</head>
+<body>
+
+<div class="card" id="connCard">
+  <h1>🀄 Rummikub · 2 jugadors</h1>
+  <p style="text-align:center;margin:4px 0;">Tot local, sense servidors externs (P2P).</p>
+  <div class="row">
+    <button onclick="hostCreate()">🎲 Crear partida</button>
+  </div>
+  <div class="row">
+    <input id="inpCode" placeholder="0000" maxlength="4" inputmode="numeric">
+    <button onclick="guestJoin()" class="ok">🔗 Unir-se</button>
+  </div>
+  <p id="connInfo"></p>
+</div>
+
+<div class="card" id="gameCard" style="display:none">
+  <h1 id="whoLbl"></h1>
+  <div class="bigmsg" id="msg"></div>
+  <div id="log"></div>
+
+  <div class="lbl">🪨 Tauler</div>
+  <div id="table" class="card"></div>
+
+  <div class="lbl">🧺 La teva mà (<span id="nTiles"></span>) — <span id="hint"></span></div>
+  <div id="rack" class="card"></div>
+
+  <div class="row" style="margin-top:10px;">
+    <button id="btnPlay" onclick="clickPlay()">▶ Jugar</button>
+    <button id="btnDraw" onclick="clickDraw()" class="ok">⬇ Agafar de la pila</button>
+    <button id="btnPass" onclick="clickPass()" class="danger">➡ Passar</button>
+  </div>
+  <p style="text-align:center;margin:8px 0;">
+    <button onclick="location.reload()" style="font-size:15px;padding:9px 12px;">🔄 Nova partida</button>
+  </p>
+</div>
+
+<script>
+/* ══════════ Estat ══════════ */
+let peer=null, conn=null, role=null, myCode=null;
+let rack=[];               // la teva mà
+const sel=new Set();       // fitxes seleccionades (ids)
+let selMeld=null;          // índex del grup del tauler seleccionat
+let pendingPlay=[];
+const G={table:[], turn:'host', pileCount:0, hInitial:false, gInitial:false,
+         gameOver:false, winner:null};
+let pile=[];               // pila d'extracció: només en el host
+
+/* ══════════ Construcció de la baralla ══════════ */
+function makeDeck(){
+  const d=[]; let n=0;
+  for(let c=0;c<4;c++) for(let v=1;v<=13;v++)
+    for(let k=0;k<2;k++) d.push({id:'t'+n++,c:c,v:v});
+  d.push({id:'J1',joker:true}); d.push({id:'J2',joker:true});
+  return d;
+}
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=a[i];a[i]=a[j];a[j]=t;}}
+
+/* ══════════ Validació de combinacions ══════════ */
+function validRun(arr){
+  const reals=arr.filter(t=>!t.joker);
+  if(arr.length<3||reals.length===0) return false;
+  if(new Set(reals.map(t=>t.c)).size!==1) return false;
+  const vs=reals.map(t=>t.v);
+  if(new Set(vs).size!==vs.length) return false;
+  const minV=Math.min(...vs), maxV=Math.max(...vs);
+  if(minV<1||maxV>13) return false;
+  return (maxV-minV+1)<=arr.length;   // els comodins cobreixen els forats
+}
+function validGroup(arr){
+  if(arr.length<3||arr.length>4) return false;
+  const reals=arr.filter(t=>!t.joker);
+  if(reals.length===0) return false;
+  if(!reals.every(t=>t.v===reals[0].v)) return false;
+  const cs=new Set(reals.map(t=>t.c));
+  if(cs.size!==reals.length) return false;
+  return reals.length+(arr.length-reals.length)<=4;
+}
+function validMeld(arr){ return Array.isArray(arr)&&arr.length>=3&&(validGroup(arr)||validRun(arr)); }
+function meldScore(m){ return m.reduce((s,t)=>s+(t.joker?0:t.v),0); }
+
+/* Partir una selecció de fitxes en combinacions vàlides (o null) */
+function bestPartition(tiles){
+  if(!tiles.length) return [];
+  const n=tiles.length;
+  for(let mask=1; mask<(1<<n); mask++){
+    const sub=[]; const rest=[];
+    for(let i=0;i<n;i++) (mask&(1<<i))?sub.push(tiles[i]):rest.push(tiles[i]);
+    if(sub.length>=3 && validMeld(sub)){
+      const r=bestPartition(rest);
+      if(r!==null) return [sub,...r];
+    }
+  }
+  return null;
+}
+
+/* ══════════ Connexió PEERJS ══════════ */
+function peerOpts(){ const o={debug:1};
+  if(CONFIG.host) Object.assign(o,{host:CONFIG.host,port:CONFIG.port,key:CONFIG.key,secure:CONFIG.secure});
+  return o; }
+
+function hostCreate(){
+  myCode=String(Math.floor(1000+Math.random()*9000));
+  peer=new Peer('rum'+myCode, peerOpts());
+  role='host';
+  const info=document.getElementById('connInfo');
+  info.textContent='Codi de la partida:  '+myCode+'   ·  esperant l\'altre jugador…';
+  peer.on('error',e=>{
+    if(e.type==='unavailable-id'){ info.textContent='Codi ocupat, generant-ne un altre…'; hostCreate(); }
+    else info.textContent='Error: '+e.type; });
+  peer.on('connection',c=>{
+    conn=c;
+    conn.on('open',()=>readyHost());
+    conn.on('data',d=>hostHandle(d));
+    conn.on('close',()=>setMsg('🔌 L\'altre jugador s\'ha desconnectat.'));
+  });
+}
+function guestJoin(){
+  const code=document.getElementById('inpCode').value.trim();
+  if(!/^\d{4}$/.test(code)){ setMsg('Escriu el codi de 4 xifres.'); return; }
+  role='guest';
+  peer=new Peer(peerOpts());
+  peer.on('open',()=>{
+    conn=peer.connect('rum'+code,{reliable:true,serialization:'json'});
+    conn.on('open',()=>conn.send({type:'join'}));
+    conn.on('data',d=>guestHandle(d));
+    conn.on('close',()=>setMsg('🔌 S\'ha tallat la connexió.'));
+    conn.on('error',()=>setMsg('⚠️ No s\'ha pogut connectar a la partida.'));
+  });
+  peer.on('error',e=>setMsg('⚠️ Error de connexió: '+e.type));
+}
+
+function readyHost(){
+  const deck=makeDeck(); shuffle(deck);
+  rack=deck.splice(0,14);            // mà del host
+  const gRack=deck.splice(0,14);     // mà del convidat
+  pile=deck; G.pileCount=pile.length;
+  G.turn='host';
+  conn.send({type:'init',rack:gRack,state:pubState()});
+  showGame(); render();
+  setMsg('🎲 Tens el primer torn! Agafa/retalla: recorda que la primera jugada ha de fer 30 punts.');
+}
+function pubState(){
+  return {table:G.table,turn:G.turn,pileCount:G.pileCount,
+          hInitial:G.hInitial,gInitial:G.gInitial,gameOver:G.gameOver,winner:G.winner};
+}
+function broadcast(){ if(conn&&conn.open) conn.send({type:'state',state:pubState()}); render(); }
+
+/* ══════════ Missatges des de l'host ══════════ */
+function hostHandle(d){
+  if(d.type==='draw'){
+    if(pile.length===0){ conn.send({type:'drawResult',tile:null}); }
+    else { const t=pile.pop(); G.pileCount=pile.length;
+           conn.send({type:'drawResult',tile:t}); }
+    G.turn='host'; broadcast();
+  }
+  else if(d.type==='play'){
+    const tiles=d.tiles; const res=tryPlay(tiles,d.target,'guest');
+    if(!res.ok){ conn.send({type:'playAck',ok:false,reason:res.reason}); }
+    else{
+      if(d.rackN===0){ G.gameOver=true; G.winner='guest'; }
+      G.turn='host';
+      conn.send({type:'playAck',ok:true,state:pubState()});
+      broadcast();
+    }
+  }
+  else if(d.type==='pass'){ G.turn='host'; broadcast(); }
+}
+
+/* ══════════ Missatges al convidat ══════════ */
+function guestHandle(d){
+  if(d.type==='init'){ rack=d.rack; Object.assign(G,d.state); showGame(); render();
+    setMsg('🔗 Connectat com a Convidat. L\'amfitrió juga primer...'); }
+  else if(d.type==='state'){ Object.assign(G,d.state); render(); }
+  else if(d.type==='drawResult'){
+    if(d.tile){ rack.push(d.tile); render(); setMsg('⬇ Has agafat una fitxa. Torn de l\'amfitrió.'); }
+    else setMsg('🕳 La pila és buida. Tria jugar o passar.');
+  }
+  else if(d.type==='playAck'){
+    if(!d.ok){ setMsg(d.reason); render(); }
+    else{
+      rack=rack.filter(t=>!pendingPlay.some(x=>x.id===t.id));
+      pendingPlay=[]; sel.clear(); selMeld=null;
+      Object.assign(G,d.state); render();
+      if(G.gameOver) setMsg((G.winner==='guest'?'Has guanyat':'L\'altre ha guanyat')+'! 🎉🎉');
+      else setMsg('✅ Ben fet! Torn de l\'amfitrió.');
+    }
+  }
+}
+
+/* ══════════ Accions de joc (funcionen per a tots dos) ══════════ */
+function tryPlay(tiles,target,who){
+  if(!tiles.length||tiles.length<3) return {ok:false,reason:'Selecciona almenys 3 fitxes.'};
+  if(target!==null && target>=0){
+    const initDone = who==='guest'?G.gInitial:G.hInitial;
+    if(!initDone) return {ok:false,reason:'Primer has de fer la teva primera jugada (30 punts), només amb fitxes teves.'};
+    const cand=[...G.table[target],...tiles];
+    if(validMeld(cand)){ G.table[target]=cand; return {ok:true}; }
+    return {ok:false,reason:'No es pot afegir això a aquest grup. Tria una altra combinació o fes-ne una de nova.'};
+  }
+  const parts=bestPartition(tiles);
+  if(!parts) return {ok:false,reason:'Aquesta combinació no és vàlida: necessites grups o escales de 3 fitxes com a mínim.'};
+  const initDone = who==='guest'?G.gInitial:G.hInitial;
+  if(!initDone){
+    const sum=parts.reduce((s,m)=>s+meldScore(m),0);
+    if(sum<30) return {ok:false,reason:'La primera jugada ha de sumar 30 punts com a mínim (ara en sumes '+sum+').'};
+    if(who==='guest')G.gInitial=true; else G.hInitial=true;
+  }
+  G.table.push(...parts);
+  return {ok:true};
+}
+
+function clickPlay(){
+  if(G.gameOver) return;
+  if(!myTurn()){ setMsg('Ara no és el teu torn.'); return; }
+  const tiles=rack.filter(t=>sel.has(t.id));
+  if(!tiles.length){ setMsg('Toca les fitxes que vols jugar i després prem ▶ Jugar.'); return; }
+  if(role==='guest'){
+    pendingPlay=tiles.map(t=>({id:t.id}));
+    conn.send({type:'play',tiles:tiles,target:selMeld,rackN:rack.length});
+  } else {
+    const res=tryPlay(tiles,selMeld,'host');
+    if(!res.ok){ setMsg(res.reason); return; }
+    rack=rack.filter(t=>!sel.has(t.id));
+    sel.clear(); selMeld=null;
+    if(rack.length===0){ G.gameOver=true; G.winner='host'; }
+    else G.turn='guest';
+    broadcast();
+    if(G.gameOver) setMsg('🎉🎉 Has guanyat! Enhorabona!');
+    else setMsg('✅ Ben fet! Ara és el torn del Convidat.');
+  }
+}
+function clickDraw(){
+  if(G.gameOver||!myTurn())return;
+  if(G.pileCount===0){ setMsg('🕳 La pila està buida: prem "Passar" si no pots jugar.'); return; }
+  sel.clear(); selMeld=null;
+  if(role==='guest'){ conn.send({type:'draw'}); }
+  else{
+    rack.push(pile.pop()); G.pileCount=pile.length; G.turn='guest';
+    broadcast(); setMsg('⬇ Has agafat una fitxa. Torn del Convidat.');
+  }
+}
+function clickPass(){
+  if(G.gameOver||!myTurn())return;
+  sel.clear(); selMeld=null;
+  if(role==='guest'){ conn.send({type:'pass'}); setMsg('✅ Has passat torn.'); }
+  else{ G.turn='guest'; broadcast(); }
+}
+
+/* ══════════ UI ══════════ */
+function myTurn(){
+  if(role==='host'&&G.turn==='host')return true;
+  if(role==='guest'&&G.turn==='guest')return true;
+  return false;
+}
+function showGame(){
+  document.getElementById('connCard').style.display='none';
+  document.getElementById('gameCard').style.display='block';
+}
+function setMsg(t){ const e=document.getElementById('msg'); e.textContent=t;
+  e.className='bigmsg '+(myTurn()&&!G.gameOver?'turn-me':'turn-not'); }
+function log(t){ const e=document.getElementById('log'); e.textContent=t; }
+
+function tileHtml(t,clickable){
+  const cls=t.joker?'tile joker':'tile c'+t.c;
+  const on=clickable?` onclick="clickTile('${t.id}')"`:'';
+  const s=sel.has(t.id)?' sel':'';
+  return `<div class="${cls}${s}"${on}>${t.joker?'★':t.v}</div>`;
+}
+function render(){
+  if(role) document.getElementById('whoLbl').textContent=
+    (role==='host'?'🖥 Amfitrió (creador)':'📱 Convidat')+
+    (G.gameOver?'':(myTurn()?' — el teu torn':' — esperant'));
+  const tableEl=document.getElementById('table');
+  let h='';
+  if(!G.table.length) h='<span style="opacity:.55">El tauler és buit. Fes la primera jugada de 30 punts!</span>';
+  G.table.forEach((m,i)=>{
+    h+=`<div class="meld${selMeld===i?' mSel':''}" onclick="clickMeld(${i})">`+
+       `<div class="meldHead">Grup ${i+1}</div>`+
+       m.map(t=>tileHtml(t,false)).join('')+'</div>';
+  });
+  tableEl.innerHTML=h;
+  // notificació de la pila
+  document.getElementById('hint').textContent=
+    'pila: '+G.pileCount+' fitxes · '+
+    ((role==='host'?G.hInitial:G.gInitial)?'primera jugada feta ✅':'has de fer 30 punts la primera vegada');
+  document.getElementById('nTiles').textContent=rack.length;
+  // mà (només clicables si és el teu torn)
+  document.getElementById('rack').innerHTML=
+    rack.map(t=>tileHtml(t,myTurn()&&!G.gameOver)).join('')||'<span style="opacity:.5">—</span>';
+  const mt=myTurn()&&!G.gameOver;
+  const p=document.getElementById('btnPlay'); p.disabled=!mt||G.gameOver;
+  const d=document.getElementById('btnDraw'); d.disabled=!mt||G.pileCount===0||G.gameOver;
+  const s=document.getElementById('btnPass'); s.disabled=!mt||G.gameOver;
+}
+function clickTile(id){ if(!myTurn()||G.gameOver)return;
+  if(sel.has(id))sel.delete(id); else sel.add(id); render(); }
+function clickMeld(i){ if(!myTurn()||G.gameOver)return;
+  selMeld=(selMeld===i)?null:i; render(); }
+</script>
+</body>
+</html>
