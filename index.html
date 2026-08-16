@@ -7,17 +7,15 @@
 <!--
   ═══ CONFIGURACIÓ DE PRIVADESA ═══
   Per defecte, la senyalització fa servir el servidor públic de PeerJS (0.peerjs.com),
-  però la partida VAIX P2P i xifrada entre els dos dispositius.
+  però la partida VIA P2P i xifrada entre els dos dispositius (la llibreria és local, a vendor/).
   Per a tot 100% local/privat:
-    1) Habitual:  npm install -g peer      (o: npm i peerjs-server)
-          inicia: peerjs --port 9000 --key peerjs
-    2) Sobtotaix línia <script> del CDN pel fitxer local, ex: deixa baixat
-          peerjs.min.js al mateix directori i posa:  <script src="peerjs.min.js">
-    3) Posau la IP del miniPC a CONFIG aquí a sota.
+    1) Engega el teu PeerServer:  npx peer --port 9000 --key peerjs
+    2) Posa la IP/domini del servidor a CONFIG aquí a sota.
+  Vegeu README.md per a instruccions completes.
 -->
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script src="vendor/peerjs.min.js"></script>
 <script>
-// Si allotgeu el vostre PeerServer, posau aquí les seves dades:
+// Si allotgeu el vostre PeerServer, poseu aquí les seves dades:
 const CONFIG = { host: undefined, port: undefined, key: 'peerjs', secure: false };
 </script>
 <style>
@@ -31,6 +29,7 @@ const CONFIG = { host: undefined, port: undefined, key: 'peerjs', secure: false 
   button{font-size:19px;padding:14px 16px;border-radius:12px;border:none;
          background:#2f6fe0;color:#fff;cursor:pointer;margin:4px;font-weight:600;}
   button:disabled{opacity:.35;cursor:default;}
+  button,.tile,input{touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
   .danger{background:#b3402c;} .ok{background:#2e9e4f;}
   input{font-size:22px;padding:12px;border-radius:10px;border:none;text-align:center;
         width:140px;letter-spacing:6px;text-transform:uppercase;}
@@ -65,7 +64,7 @@ const CONFIG = { host: undefined, port: undefined, key: 'peerjs', secure: false 
   <h1>🀄 Rummikub · 2 jugadors</h1>
   <p style="text-align:center;margin:4px 0;">Tot local, sense servidors externs (P2P).</p>
   <div class="row">
-    <button onclick="hostCreate()">🎲 Crear partida</button>
+    <button id="btnCreate" onclick="hostCreate()">🎲 Crear partida</button>
   </div>
   <div class="row">
     <input id="inpCode" placeholder="0000" maxlength="4" inputmode="numeric">
@@ -159,16 +158,38 @@ function peerOpts(){ const o={debug:1};
   if(CONFIG.host) Object.assign(o,{host:CONFIG.host,port:CONFIG.port,key:CONFIG.key,secure:CONFIG.secure});
   return o; }
 
+let hostRetries=0;
 function hostCreate(){
   myCode=String(Math.floor(1000+Math.random()*9000));
+  if(peer) { try{ peer.destroy(); }catch(_){} peer=null; }
   peer=new Peer('rum'+myCode, peerOpts());
   role='host';
   const info=document.getElementById('connInfo');
+  const createBtn=document.getElementById('btnCreate');
   info.textContent='Codi de la partida:  '+myCode+'   ·  esperant l\'altre jugador…';
+  if(createBtn){ createBtn.disabled=true; }
   peer.on('error',e=>{
-    if(e.type==='unavailable-id'){ info.textContent='Codi ocupat, generant-ne un altre…'; hostCreate(); }
-    else info.textContent='Error: '+e.type; });
+    if(e.type==='unavailable-id' && hostRetries<20){
+      hostRetries++;
+      info.textContent='Codi ocupat, generant-ne un altre…';
+      try{ peer.destroy(); }catch(_){} peer=null;
+      hostCreate();
+    }
+    else if(e.type==='unavailable-id'){
+      info.textContent='No s\'ha pogut reservar cap codi. Torna-ho a provar.';
+      if(createBtn){ createBtn.disabled=false; createBtn.textContent='🎲 Crear partida'; }
+    }
+    else{
+      info.textContent='Error: '+e.type;
+      if(createBtn){ createBtn.disabled=false; createBtn.textContent='🎲 Crear partida'; }
+    }
+  });
   peer.on('connection',c=>{
+    if(conn && conn.open){
+      setMsg('🔒 Ja hi ha un altre jugador connectat.');
+      try{ c.close(); }catch(_){}
+      return;
+    }
     conn=c;
     conn.on('open',()=>readyHost());
     conn.on('data',d=>hostHandle(d));
@@ -176,18 +197,28 @@ function hostCreate(){
   });
 }
 function guestJoin(){
+  if(role==='guest' && peer && !peer.destroyed) return;   // ignora dobles clics
   const code=document.getElementById('inpCode').value.trim();
   if(!/^\d{4}$/.test(code)){ setMsg('Escriu el codi de 4 xifres.'); return; }
   role='guest';
+  if(peer) { try{ peer.destroy(); }catch(_){} peer=null; }
+  const joinBtn=document.querySelector('#connCard .row button.ok');
+  joinBtn.disabled=true; joinBtn.textContent='Connectant…';
   peer=new Peer(peerOpts());
   peer.on('open',()=>{
     conn=peer.connect('rum'+code,{reliable:true,serialization:'json'});
     conn.on('open',()=>conn.send({type:'join'}));
     conn.on('data',d=>guestHandle(d));
     conn.on('close',()=>setMsg('🔌 S\'ha tallat la connexió.'));
-    conn.on('error',()=>setMsg('⚠️ No s\'ha pogut connectar a la partida.'));
+    conn.on('error',()=>{
+      setMsg('⚠️ No s\'ha trobat la partida '+code+'. Revisa el codi.');
+      joinBtn.disabled=false; joinBtn.textContent='🔗 Unir-se';
+    });
   });
-  peer.on('error',e=>setMsg('⚠️ Error de connexió: '+e.type));
+  peer.on('error',e=>{
+    setMsg('⚠️ Error de connexió: '+e.type);
+    joinBtn.disabled=false; joinBtn.textContent='🔗 Unir-se';
+  });
 }
 
 function readyHost(){
@@ -218,10 +249,13 @@ function hostHandle(d){
     const tiles=d.tiles; const res=tryPlay(tiles,d.target,'guest');
     if(!res.ok){ conn.send({type:'playAck',ok:false,reason:res.reason}); }
     else{
-      if(d.rackN===0){ G.gameOver=true; G.winner='guest'; }
+      // El convidat guanya si, després de jugar, es queda sense fitxes
+      // (agafa totes les que ha jugat = totes les que tenia a la mà).
+      if(d.rackN===d.tiles.length){ G.gameOver=true; G.winner='guest'; }
       G.turn='host';
       conn.send({type:'playAck',ok:true,state:pubState()});
       broadcast();
+      if(G.gameOver) setMsg('📱 El Convidat ha guanyat la partida. 🏁');
     }
   }
   else if(d.type==='pass'){ G.turn='host'; broadcast(); }
@@ -250,7 +284,7 @@ function guestHandle(d){
 
 /* ══════════ Accions de joc (funcionen per a tots dos) ══════════ */
 function tryPlay(tiles,target,who){
-  if(!tiles.length||tiles.length<3) return {ok:false,reason:'Selecciona almenys 3 fitxes.'};
+  if(!tiles.length) return {ok:false,reason:'Selecciona almenys 1 fitxa.'};
   if(target!==null && target>=0){
     const initDone = who==='guest'?G.gInitial:G.hInitial;
     if(!initDone) return {ok:false,reason:'Primer has de fer la teva primera jugada (30 punts), només amb fitxes teves.'};
@@ -258,6 +292,7 @@ function tryPlay(tiles,target,who){
     if(validMeld(cand)){ G.table[target]=cand; return {ok:true}; }
     return {ok:false,reason:'No es pot afegir això a aquest grup. Tria una altra combinació o fes-ne una de nova.'};
   }
+  if(tiles.length<3) return {ok:false,reason:'Selecciona almenys 3 fitxes per fer una combinació nova.'};
   const parts=bestPartition(tiles);
   if(!parts) return {ok:false,reason:'Aquesta combinació no és vàlida: necessites grups o escales de 3 fitxes com a mínim.'};
   const initDone = who==='guest'?G.gInitial:G.hInitial;
@@ -328,6 +363,10 @@ function tileHtml(t,clickable){
   return `<div class="${cls}${s}"${on}>${t.joker?'★':t.v}</div>`;
 }
 function render(){
+  // Quan no és el teu torn, deixa de mostrar selecció
+  if(!myTurn() && !G.gameOver){
+    if(sel.size || selMeld!==null){ sel.clear(); selMeld=null; }
+  }
   if(role) document.getElementById('whoLbl').textContent=
     (role==='host'?'🖥 Amfitrió (creador)':'📱 Convidat')+
     (G.gameOver?'':(myTurn()?' — el teu torn':' — esperant'));
