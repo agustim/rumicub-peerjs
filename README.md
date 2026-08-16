@@ -14,6 +14,9 @@ No cal registrar-se, no hi ha comptes ni servidor de partides.
 2. Un jugador prem **🎲 Crear partida** i veu un **codi de 4 xifres**.
 3. L'altre introdueix el codi i prem **🔗 Unir-se**.
 4. La connexió es fa directament entre els dos dispositius (per WebRTC).
+5. Si l'altre jugador **no rep resposta en unir-se** (sense cap missatge), mira
+   l'avís que apareix i, si cal, posa el teu servidor de senyalització a la
+   **⚙️ Servidor de senyalització** (més avall expliquem com).
 
 ### Regles implementades
 
@@ -62,49 +65,79 @@ Si prefereixes no tocar res de GitHub Actions:
 
 ## 🧪 Provar en local
 
-Només cal servir el directori amb qualsevol servidor estàtic:
+Serveix el directori amb qualsevol servidor estàtic (per ex. `python3 -m http.server 8080`
+o `npx serve .`) i obre `http://localhost:8080`.
 
-```bash
-# amb Python
-python3 -m http.server 8080
-# o amb Node (npx)
-npx serve .
-```
-
-Obre `http://localhost:8080` des de dos navegadors per provar-ho.
+> Pots provar el joc sencer al mateix ordinador amb dos navegadors/tabs: mira la
+> "Prova ràpida al mateix ordinador" a l'apartat de senyalització.
 
 ### Requisit: servidor de senyalització
 
 Perquè els dos dispositius **es trobin**, PeerJS fa servir un *signaling server*
-que només fa de "punt de trobada" (no hi passa la partida). Per defecte el codi
-usa el servidor públic de PeerJS (`0.peerjs.com`), que és gratuït i no cal
-configurar res.
+que només fa de "punt de trobada": la partida no hi passa, va **directa P2P** (i
+xifrada) entre els dos dispositius.
 
-Si algun dia el servidor públic falla o vols privacitat total, pots **allotjar el
-teu propi PeerServer** (per exemple a un miniPC de casa o a un servei gratuït):
+Per defecte el joc usa el **servidor públic de PeerJS (`0.peerjs.com`)**, sense
+configurar res. ⚠️ **Aquest servidor públic és sovint inestable o està caigut.**
+Com ho sabràs: l'amfitrió es queda a "⏳ Connectant…" i després surt un avís, o el
+convidat no rep cap resposta. En aquest cas:
+
+**La manera fiable és allotjar-te el teu propi PeerServer**, per exemple a un
+miniPC de casa o a un VPS/servei gratuït:
 
 ```bash
-# si tens Node ≥ 18
-npx peer --port 9000 --key peerjs
-# o installat de forma permanent:
-npm install -g peer
+# Node ≥ 18
+npm install -g peerjs
 peerjs --port 9000 --key peerjs
 ```
 
-Després, obre l'`index.html` i posa les dades de CONFIG:
+I a la pantalla d'inici del joc, desplega **⚙️ Servidor de senyalització** i
+escriu:
 
-```js
-const CONFIG = { host: 'el-teu-ip-o-domini', port: 9000, key: 'peerjs', secure: false };
+```
+Servidor propi:  <la-ip-o-domini-del-servidor>
+port:            9000
 ```
 
-> Si fas servir el servern local, els jugadors han d'arribar a la pàgina per
-> `http://IP:9000` o per una IP pública (cal obrir el port 9000 al router).
+> El joc tria sol el protocol: si la pàgina es serveix per **https** connectarà
+> amb **wss**; si és **http**, amb ws.
+
+#### Prova ràpida al mateix ordinador (avui mateix, sense desplegar res)
+
+Tot en una sola màquina, amb dos navegadors/tabs:
+
+1. Engega el teu servidor de senyalització:  `peerjs --port 9000 --key peerjs`
+2. Serveix el joc:  `python3 -m http.server 8080`
+3. Obre `http://localhost:8080` en **dues finestres**.
+4. A totes dues, ⚙️ → `Servidor propi: localhost`, `port: 9000`.
+5. A una prem "🎲 Crear partida"; a l'altra posa el codi i "🔗 Unir-se".
+
+(`localhost` es considera un context segur, per això el WebRTC funciona amb ws
+sense necessitat d'HTTPS.)
+
+#### Dos mòbils (o mòbil + ordinador) de veritat
+
+El navegador només permet WebRTC si la pàgina es serveix per **HTTPS** (context
+segur). Opcions:
+
+- **Recomanada:** la pàgina a GitHub Pages (https) i el teu PeerServer amb
+  **TLS (wss)**, ja sigui al miniPC amb un certificat
+  (`peerjs --port 9000 --key peerjs --sslkey clau.pem --sslcert cert.pem`) o en
+  un servei al núvol que et doni un domini https gratuït.
+- **Alternativa 100% a casa:** serveix la pàgina i el PeerServer des del mateix
+  dispositiu de la xarxa local usant un certificat autosignat (per ex. `mkcert`),
+  i accediu tots dos per `https://<ip-del-minipc>`. Els dos dispositius han
+  d'estar a la mateixa xarxa (o cal obrir el port al router si no).
+
+> ⚠️ **Recorda:** sense HTTPS la pàgina al mòbil pot no poder obrir el canal P2P,
+> independentment de la senyalització. Per això la combinació **GitHub Pages
+> (https) + PeerServer propi amb wss** és la més fiable.
 
 ### ⚠️ Nota sobre xarxes
 
 La connexió P2P fa servir WebRTC (STUN de Google). Normalment funciona amb
 Wi‑Fi i dades mòbils, però **algunes xarxes corporatives o amb NAT estricte
-bloquegen el P2P**. Consells si no us conecteu:
+bloquegen el P2P**. Consells:
 
 - Prova un dispositiu amb **dades mòbils (4G/5G)** i l'altre amb Wi‑Fi.
 - Prova ambdós a la mateixa xarxa.

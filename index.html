@@ -15,8 +15,16 @@
 -->
 <script src="vendor/peerjs.min.js"></script>
 <script>
-// Si allotgeu el vostre PeerServer, poseu aquí les seves dades:
-const CONFIG = { host: undefined, port: undefined, key: 'peerjs', secure: false };
+// Configuració del servidor de senyalització.
+// Es pot editar des de la ⚙️ de la pantalla d'inici i es desa al navegador.
+// En blanc = servidor públic de PeerJS (0.peerjs.com). Ompliu-lo si voleu un de propi.
+let CONFIG = { host: undefined, port: undefined, key: 'peerjs' };
+try{
+  const h=(localStorage.getItem('rumikub_host')||'').trim();
+  const p=parseInt(localStorage.getItem('rumikub_port')||'',10);
+  if(h) CONFIG.host=h;
+  if(p>0) CONFIG.port=p;
+}catch(_){}
 </script>
 <style>
   *{box-sizing:border-box;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;}
@@ -64,12 +72,24 @@ const CONFIG = { host: undefined, port: undefined, key: 'peerjs', secure: false 
   <h1>🀄 Rummikub · 2 jugadors</h1>
   <p style="text-align:center;margin:4px 0;">Tot local, sense servidors externs (P2P).</p>
   <div class="row">
-    <button id="btnCreate" onclick="hostCreate()">🎲 Crear partida</button>
+    <button id="btnCreate" onclick="settingsSave();hostCreate()">🎲 Crear partida</button>
   </div>
   <div class="row">
     <input id="inpCode" placeholder="0000" maxlength="4" inputmode="numeric">
-    <button onclick="guestJoin()" class="ok">🔗 Unir-se</button>
+    <button onclick="settingsSave();guestJoin()" class="ok">🔗 Unir-se</button>
   </div>
+  <details id="srvSet">
+    <summary style="cursor:pointer;text-align:center;font-size:14px;color:#cfe8d6;">⚙️ Servidor de senyalització</summary>
+    <div class="row">
+      <input id="inpHost" placeholder="Servidor propi, ex: 192.168.1.50" style="width:auto;flex:1;min-width:0;font-size:15px;letter-spacing:0;text-transform:none;">
+      <input id="inpPort" placeholder="port" inputmode="numeric" style="width:84px;font-size:15px;letter-spacing:0;">
+    </div>
+    <p style="font-size:12px;color:#bcd8c5;text-align:center;margin:6px 0;">
+      En blanc = servidor públic de PeerJS. Si no es connecten, posa aquí el teu
+      servidor (IP i port) i prem el botó que necessitis. Amb la pàgina a GitHub
+      Pages (https) el teu servidor ha de fer servir wss/TLS. Vegeu README.
+    </p>
+  </details>
   <p id="connInfo"></p>
 </div>
 
@@ -155,8 +175,33 @@ function bestPartition(tiles){
 
 /* ══════════ Connexió PEERJS ══════════ */
 function peerOpts(){ const o={debug:1};
-  if(CONFIG.host) Object.assign(o,{host:CONFIG.host,port:CONFIG.port,key:CONFIG.key,secure:CONFIG.secure});
+  if(CONFIG.host){
+    // wss si la pàgina es serveix per https (ex: GitHub Pages); si no, ws
+    const secured = location.protocol==='https:';
+    Object.assign(o,{host:CONFIG.host, port:CONFIG.port||9000, key:CONFIG.key, secure:secured});
+  }
   return o; }
+
+function settingsSave(){
+  const hEl=document.getElementById('inpHost'); if(!hEl) return;
+  const h=(hEl.value||'').trim();
+  const p=parseInt((document.getElementById('inpPort').value||''),10);
+  CONFIG.host=h||undefined; CONFIG.port=(p>0)?p:undefined;
+  try{ localStorage.setItem('rumikub_host',h); localStorage.setItem('rumikub_port',p>0?String(p):''); }catch(_){}
+}
+function prefillSettings(){
+  try{
+    if(CONFIG.host) document.getElementById('inpHost').value=CONFIG.host;
+    if(CONFIG.port) document.getElementById('inpPort').value=CONFIG.port;
+  }catch(_){}
+}
+function serverHint(){
+  if(CONFIG.host) return 'Comprova que el servidor '+CONFIG.host+':'+(CONFIG.port||9000)+' és en marxa i el pots arribar.';
+  return 'El servidor públic de PeerJS pot estar caigut: obre ⚙️ Servidor de senyalització i posa-hi el teu (vegeu README).';
+}
+function openSrvHelp(){ try{ document.getElementById('srvSet').open=true; }catch(_){} }
+let connTimer=null;
+function clearConnTimer(){ if(connTimer){ clearTimeout(connTimer); connTimer=null; } }
 
 let hostRetries=0;
 function hostCreate(){
@@ -166,23 +211,39 @@ function hostCreate(){
   role='host';
   const info=document.getElementById('connInfo');
   const createBtn=document.getElementById('btnCreate');
-  info.textContent='Codi de la partida:  '+myCode+'   ·  esperant l\'altre jugador…';
+  info.textContent='⏳ Connectant amb el servidor de senyalització…';
   if(createBtn){ createBtn.disabled=true; }
+  clearConnTimer();
+  connTimer=setTimeout(()=>{
+    if(!conn && createBtn){
+      info.textContent='⚠️ '+serverHint();
+      openSrvHelp();
+      createBtn.disabled=false; createBtn.textContent='🎲 Crear partida';
+    }
+  },15000);
+  peer.on('open',()=>{
+    clearConnTimer();
+    info.textContent='Codi de la partida:  '+myCode+'   ·  ✓ servidor connectat. Esperant l\'altre jugador…';
+  });
   peer.on('error',e=>{
+    clearConnTimer();
     if(e.type==='unavailable-id' && hostRetries<20){
       hostRetries++;
       info.textContent='Codi ocupat, generant-ne un altre…';
       try{ peer.destroy(); }catch(_){} peer=null;
-      hostCreate();
+      hostCreate(); return;
     }
     else if(e.type==='unavailable-id'){
       info.textContent='No s\'ha pogut reservar cap codi. Torna-ho a provar.';
-      if(createBtn){ createBtn.disabled=false; createBtn.textContent='🎲 Crear partida'; }
+    }
+    else if(e.type==='network'){
+      info.textContent='⚠️ No s\'ha pogut contactar el servidor de senyalització. '+serverHint();
+      openSrvHelp();
     }
     else{
-      info.textContent='Error: '+e.type;
-      if(createBtn){ createBtn.disabled=false; createBtn.textContent='🎲 Crear partida'; }
+      info.textContent='Error de connexió: '+e.type+'. '+serverHint();
     }
+    if(createBtn){ createBtn.disabled=false; createBtn.textContent='🎲 Crear partida'; }
   });
   peer.on('connection',c=>{
     if(conn && conn.open){
@@ -203,20 +264,41 @@ function guestJoin(){
   role='guest';
   if(peer) { try{ peer.destroy(); }catch(_){} peer=null; }
   const joinBtn=document.querySelector('#connCard .row button.ok');
-  joinBtn.disabled=true; joinBtn.textContent='Connectant…';
+  joinBtn.disabled=true; joinBtn.textContent='⏳ Connectant…';
+  clearConnTimer();
+  // 1) Que el servidor de senyalització respongui (que el peer s'obri)
+  connTimer=setTimeout(()=>{
+    if(!conn && joinBtn){
+      setMsg('⚠️ El servidor de senyalització no respon. '+serverHint());
+      openSrvHelp();
+      joinBtn.disabled=false; joinBtn.textContent='🔗 Unir-se';
+    }
+  },15000);
   peer=new Peer(peerOpts());
   peer.on('open',()=>{
+    clearConnTimer();
     conn=peer.connect('rum'+code,{reliable:true,serialization:'json'});
-    conn.on('open',()=>conn.send({type:'join'}));
+    // 2) Que el canal de dades (P2P) s'obri
+    connTimer=setTimeout(()=>{
+      if(!conn.open && joinBtn){
+        setMsg('⚠️ No s\'ha pogut connectar amb l\'altre jugador. Revisa el codi, que l\'altre sigui a la pantalla d\'espera, o prova una altra xarxa. '+serverHint());
+        joinBtn.disabled=false; joinBtn.textContent='🔗 Unir-se';
+      }
+    },20000);
+    conn.on('open',()=>{ clearConnTimer(); conn.send({type:'join'}); });
     conn.on('data',d=>guestHandle(d));
     conn.on('close',()=>setMsg('🔌 S\'ha tallat la connexió.'));
     conn.on('error',()=>{
-      setMsg('⚠️ No s\'ha trobat la partida '+code+'. Revisa el codi.');
+      clearConnTimer();
+      setMsg('⚠️ No s\'ha trobat la partida '+code+'. Revisa el codi i que l\'altre jugador esperi a la pantalla.');
       joinBtn.disabled=false; joinBtn.textContent='🔗 Unir-se';
     });
   });
   peer.on('error',e=>{
-    setMsg('⚠️ Error de connexió: '+e.type);
+    clearConnTimer();
+    if(e.type==='network') setMsg('⚠️ No s\'ha pogut contactar el servidor de senyalització. '+serverHint());
+    else setMsg('⚠️ Error de connexió: '+e.type+'. '+serverHint());
+    openSrvHelp();
     joinBtn.disabled=false; joinBtn.textContent='🔗 Unir-se';
   });
 }
@@ -396,6 +478,9 @@ function clickTile(id){ if(!myTurn()||G.gameOver)return;
   if(sel.has(id))sel.delete(id); else sel.add(id); render(); }
 function clickMeld(i){ if(!myTurn()||G.gameOver)return;
   selMeld=(selMeld===i)?null:i; render(); }
+
+/* Mostra la configuració guardada al desplegable ⚙️ en carregar */
+prefillSettings();
 </script>
 </body>
 </html>
