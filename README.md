@@ -1,38 +1,45 @@
 # 🀄 Rummikub P2P per a mòbil
 
-Versió en línia (2 jugadors) del **Rummikub** que funciona des del mòbil, feta amb
-**PeerJS**: les dades del joc viatgen **directes entre els dos dispositius (P2P)**.
-No cal registrar-se, no hi ha comptes ni servidor de partides.
+Versió en línia (**2–8 jugadors**, fins a 2 jocs de fitxes) del **Rummikub** que
+funciona des del mòbil, feta amb **PeerJS**: les dades del joc viatgen **directes
+entre els dispositius (P2P)**. No cal registrar-se, no hi ha comptes ni servidor
+de partides.
 
 - 🔗 Tot el joc és un únic `index.html` (client pur, sense backend).
-- 🔒 La partida és P2P i xifrada (WebRTC DTLS) entre els dos jugadors.
+- 🔒 La partida és P2P i xifrada (WebRTC DTLS) entre els jugadors.
 - 📱 Dissenyat per al mòbil (tàctil, sense zoom accidental).
 
 ## Com es juga
 
-1. Obre la pàgina des de dos dispositius (mòbil + ordinador, o dos mòbils).
-2. Un jugador prem **🎲 Crear partida** i veu un **codi de 4 xifres**.
-3. L'altre introdueix el codi i prem **🔗 Unir-se**.
-4. La connexió es fa directament entre els dos dispositius (per WebRTC).
-5. Si l'altre jugador **no rep resposta en unir-se** (sense cap missatge), mira
+1. Obre la pàgina des de tants dispositius com jugadors (mòbils i/o ordinador).
+2. Un jugador prem **🎲 Crear partida** i veu un **codi de 4 xifres** i un lobby.
+3. Els altres introdueixen el codi i prem **🔗 Unir-se**; van apareixent al lobby.
+4. L'amfitrió tria *quants jugadors* (2–8) i prem **🚀 Començar partida** (calen
+   com a mínim 2). Amb **més de 4 jugadors s'usen automàticament 2 jocs de
+   fitxes** (212 en total); amb 2–4, un sol joc (106).
+5. La connexió es fa directament entre cada dispositiu i l'amfitrió (per WebRTC);
+   l'amfitrió valida els moviments i retransmet el tauler a tothom.
+6. Cada jugador comença amb **14 fitxes** siguin quants siguin.
+7. Si l'altre jugador **no rep resposta en unir-se** (sense cap missatge), mira
    l'avís que apareix i, si cal, posa el teu servidor de senyalització a la
    **⚙️ Servidor de senyalització** (més avall expliquem com).
 
 ### Regles implementades
 
-- Baralla completa: 106 fitxes (2 baralles de 52 + 2 comodins).
+- Baralla completa: 2–4 jugadors → **1 joc de fitxes (106 amb 2 comodins)**;
+  5–8 jugadors → **2 jocs (212 amb 4 comodins)**.
+- 14 fitxes a la mà per a cada jugador.
 - Jugada inicial obligatòria de **30 punts** (només amb fitxes pròpies).
 - Combinacions vàlides: escales del mateix color i grups de 3-4 del mateix número.
 - El comodí substitueix qualsevol fitxa i, per a la jugada inicial, compta pel
   valor que representa (ex: grup 13,13,comodí = 39 punts).
-- Guanya qui buida la mà primer.
+- Els torns roten en sentit horari; guanya qui buida la mà primer.
 - Accions per torn: **▶ Jugar** (fitxes seleccionades, opcionalment afegides a un
   grup del tauler), **⬇ Agafar de la pila** o **➡ Passar**.
 
 > ⚠️ **Simplificacions respecte al Rummikub oficial:** no es permet reordenar les
 > combinacions del tauler (partir grups, moure fitxes entre combinacions ni
-> recuperar un comodí), només s'hi poden afegir fitxes. La partida és només de
-> 2 jugadors i sense temporitzador.
+> recuperar un comodí), només s'hi poden afegir fitxes. Sense temporitzador.
 
 ## 🚀 Desplegament a GitHub Pages
 
@@ -105,13 +112,14 @@ port:            9000
 
 #### Prova ràpida al mateix ordinador (avui mateix, sense desplegar res)
 
-Tot en una sola màquina, amb dos navegadors/tabs:
+Tot en una sola màquina, amb diversos navegadors/tabs (2, 3… fins a 8):
 
 1. Engega el teu servidor de senyalització:  `peerjs --port 9000 --key peerjs`
 2. Serveix el joc:  `python3 -m http.server 8080`
-3. Obre `http://localhost:8080` en **dues finestres**.
-4. A totes dues, ⚙️ → `Servidor propi: localhost`, `port: 9000`.
-5. A una prem "🎲 Crear partida"; a l'altra posa el codi i "🔗 Unir-se".
+3. Obre `http://localhost:8080` en **dues (o més) finestres**.
+4. A totes, ⚙️ → `Servidor propi: localhost`, `port: 9000`.
+5. A una prem "🎲 Crear partida", tria quants jugadors i prem "Començar"; a les
+   altres posa el codi i "🔗 Unir-se".
 
 (`localhost` es considera un context segur, per això el WebRTC funciona amb ws
 sense necessitat d'HTTPS.)
@@ -155,6 +163,5 @@ vendor/peerjs.min.js  → llibreria PeerJS 1.5.2 baixada localment (redundància
 ## 📌 Limitacions i idees futures
 
 - Reordenar combinacions del tauler (partir/moure/recuperar comodins).
-- Mode 3-4 jugadors (realment el Rummikub és de 4).
 - Temporitzador per torn i tauler de puntuació.
 - Enviar els 4 dits llargs amb el teu PeerServer com a TURN per a xarxes estrictes.
