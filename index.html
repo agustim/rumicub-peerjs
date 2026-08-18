@@ -55,16 +55,23 @@ try{
   .tile.joker{background:#161616;color:#ffd23f;font-size:26px;}
   .tile.sel{outline:4px solid #ffd23f;transform:translateY(-6px);}
   .meld{border:3px dashed rgba(255,255,255,.28);border-radius:12px;padding:4px 4px 2px;
-        display:inline-block;margin:5px;background:rgba(0,0,0,.15);vertical-align:top;}
+        display:inline-block;margin:5px;background:rgba(0,0,0,.15);vertical-align:top;
+        max-width:100%;}
   .meld.mSel{border-color:#ffd23f;background:rgba(255,210,63,.16);}
-  .meldHead{font-size:12px;text-align:center;color:#cfe8d6;padding:2px;}
-  #table{white-space:nowrap;overflow-x:auto;min-height:96px;padding:4px 2px;}
+  .meldHead{font-size:12px;text-align:center;color:#cfe8d6;padding:2px 6px;}
+  #table{white-space:normal;overflow-x:auto;min-height:96px;padding:4px 2px;text-align:center;}
   #rack{white-space:normal;min-height:84px;padding:6px;background:rgba(0,0,0,.22);
         border-radius:14px;}
   .row{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;}
   .lbl{font-size:15px;font-weight:700;margin:8px 0 4px;}
   .dim{opacity:.45;}
   .turn-me{color:#ffd23f;} .turn-not{color:#cfe8d6;}
+  /* Taulell compacte al mòbil: les combinacions s'apilen en vertical */
+  @media (max-width:520px){
+    .tile{width:38px;height:54px;line-height:44px;font-size:19px;margin:2px;}
+    #rack .tile{width:33px;height:47px;line-height:38px;font-size:16px;}
+    .tile.joker{font-size:23px;}
+  }
 </style>
 </head>
 <body>
@@ -116,7 +123,7 @@ try{
   <div class="bigmsg" id="msg"></div>
   <div id="log"></div>
 
-  <div class="lbl">🪨 Tauler</div>
+  <div class="lbl" id="tableLbl">🪨 Tauler</div>
   <div id="table" class="card"></div>
 
   <div class="lbl">🧺 La teva mà (<span id="nTiles"></span>) — <span id="hint"></span></div>
@@ -500,10 +507,10 @@ function hostHandle(d,pidx){
     advance(); broadcast();
   }
   else if(d.type==='play'){
-    const tiles=d.tiles; const res=tryPlay(tiles,d.target,pidx);
+    const res=tryPlay(d.tiles,d.target,pidx,d.take);
     if(!res.ok){ hostSend(pidx,{type:'playAck',ok:false,reason:res.reason}); return; }
-    // El jugador guanya si, després de jugar, es queda sense fitxes
-    if(d.rackN===d.tiles.length){ G.gameOver=true; G.winner=pidx; }
+    // El jugador guanya si, després de jugar, es queda sense fitxes de la mà
+    if((d.tiles||[]).length>0 && d.rackN===d.tiles.length){ G.gameOver=true; G.winner=pidx; }
     else advance();
     hostSend(pidx,{type:'playAck',ok:true,state:pubState()});
     broadcast();
@@ -546,40 +553,71 @@ function nextTurnMsg(){
 }
 
 /* ══════════ Accions de joc ══════════ */
-function tryPlay(tiles,target,who){
-  if(!tiles.length) return {ok:false,reason:'Selecciona almenys 1 fitxa.'};
+/* Resol una jugada de manera atòmica. Accepta:
+   - tiles: fitxes de la mà (rack) seleccionades
+   - take:  [{from:meldIdx, id:...}] fitxes agafades del tauler
+   - target: meld on abocar-ho tot, o null = fer combinacions noves
+   Valida el tauler FINAL (cada meld ha de ser vàlid): això permet moure
+   fitxes entre grups i recuperar comodins sempre que al final tot quadri. */
+function tryPlay(tiles,target,who,take){
+  take=take||[];
+  if((!tiles||!tiles.length) && take.length===0)
+    return {ok:false,reason:'Selecciona almenys 1 fitxa.'};
+  if(!G.initial[who] && (take.length>0 || target!==null))
+    return {ok:false,reason:'La primera jugada només es pot fer amb fitxes de la teva mà (30 punts), sense tocar el tauler.'};
+  // 1) còpia de treball del tauler
+  const tb=G.table.map(m=>m.map(t=>({...t})));
+  // 2) treu del tauler les fitxes seleccionades
+  const moving=[];
+  for(const tk of take){
+    const m=tb[tk.from];
+    if(!m) return {ok:false,reason:'Error intern: combinació no trobada.'};
+    const i=m.findIndex(t=>t.id===tk.id);
+    if(i===-1) return {ok:false,reason:'Error intern: fitxa no trobada.'};
+    moving.push(...m.splice(i,1));
+  }
+  // 3) combinat = fitxes de la mà + fitxes agafades del tauler
+  const combined=(tiles||[]).concat(moving);
+  // 4) si hi ha destí, aboca-ho tot allà
   if(target!==null && target>=0){
-    if(!G.initial[who]) return {ok:false,reason:'Primer has de fer la teva primera jugada (30 punts), només amb fitxes teves.'};
-    const cand=[...G.table[target],...tiles];
-    if(validMeld(cand)){ G.table[target]=cand; return {ok:true}; }
-    return {ok:false,reason:'No es pot afegir això a aquest grup. Tria una altra combinació o fes-ne una de nova.'};
+    const dest=tb[target];
+    if(!dest) return {ok:false,reason:'Selecciona un grup vàlid.'};
+    tb[target]=dest.concat(combined);
+  } else if(combined.length){
+    // combinacions noves a partir del combinat
+    if(combined.length>8) return {ok:false,reason:'Massa fitxes per fer combinacions noves d\'un sol cop (màx. 8).'};
+    const parts=bestPartition(combined);
+    if(!parts) return {ok:false,reason:'Aquesta combinació no és vàlida: necessites grups o escales de 3 fitxes com a mínim.'};
+    if(!G.initial[who]){
+      const sum=parts.reduce((s,m)=>s+meldScore(m),0);
+      if(sum<30) return {ok:false,reason:'La primera jugada ha de sumar 30 punts com a mínim (ara en sumes '+sum+').'};
+      G.initial[who]=true;
+    }
+    tb.push(...parts);
   }
-  if(tiles.length<3) return {ok:false,reason:'Selecciona almenys 3 fitxes per fer una combinació nova.'};
-  const parts=bestPartition(tiles);
-  if(!parts) return {ok:false,reason:'Aquesta combinació no és vàlida: necessites grups o escales de 3 fitxes com a mínim.'};
-  if(!G.initial[who]){
-    const sum=parts.reduce((s,m)=>s+meldScore(m),0);
-    if(sum<30) return {ok:false,reason:'La primera jugada ha de sumar 30 punts com a mínim (ara en sumes '+sum+').'};
-    G.initial[who]=true;
-  }
-  G.table.push(...parts);
+  // 5) valida el tauler final: cada meld ha de ser vàlid o quedar buit
+  for(const m of tb){ if(m.length && !validMeld(m)) return {ok:false,reason:'En moure fitxes, algun grup del tauler queda en mal estat. Desfés la manipulació.'}; }
+  G.table=tb.filter(m=>m.length>0);
   return {ok:true};
 }
 
 function clickPlay(){
   if(G.gameOver) return;
   if(!myTurn()){ setMsg('Ara no és el teu torn.'); return; }
-  const tiles=rack.filter(t=>sel.has(t.id));
-  if(!tiles.length){ setMsg('Toca les fitxes que vols jugar i després prem ▶ Jugar.'); return; }
+  const handSel=rack.filter(t=>sel.has(t.id));
+  const take=[];
+  G.table.forEach((m,mi)=>m.forEach(t=>{ if(sel.has(t.id)) take.push({from:mi,id:t.id}); }));
+  if(!handSel.length && !take.length){ setMsg('Toca les fitxes que vols jugar i després prem ▶ Jugar.'); return; }
   if(role==='guest'){
-    pendingPlay=tiles.map(t=>({id:t.id}));
-    conn.send({type:'play',player:me,tiles:tiles,target:selMeld,rackN:rack.length});
+    pendingPlay=handSel.map(t=>({id:t.id}));
+    conn.send({type:'play',player:me,tiles:handSel,take:take,target:selMeld,rackN:rack.length});
   } else {
-    const res=tryPlay(tiles,selMeld,0);
+    const res=tryPlay(handSel,selMeld,0,take);
     if(!res.ok){ setMsg(res.reason); return; }
     rack=rack.filter(t=>!sel.has(t.id));
+    const won = handSel.length>0 && rack.length===0;   // només si buides la mà amb fitxes pròpies
     sel.clear(); selMeld=null;
-    if(rack.length===0){ G.gameOver=true; G.winner=0; }
+    if(won){ G.gameOver=true; G.winner=0; }
     else advance();
     broadcast();
     if(G.gameOver) setMsg('🎉🎉 Has guanyat! Enhorabona!');
@@ -616,7 +654,7 @@ function log(t){ const e=document.getElementById('log'); e.textContent=t; }
 
 function tileHtml(t,clickable){
   const cls=t.joker?'tile joker':'tile c'+t.c;
-  const on=clickable?` onclick="clickTile('${t.id}')"`:'';
+  const on=clickable?` onclick="event.stopPropagation();clickTile('${t.id}')"`:'';
   const s=sel.has(t.id)?' sel':'';
   return `<div class="${cls}${s}"${on}>${t.joker?'★':t.v}</div>`;
 }
@@ -633,10 +671,12 @@ function render(){
   if(!G.table.length) h='<span style="opacity:.55">El tauler és buit. Fes la primera jugada de 30 punts!</span>';
   G.table.forEach((m,i)=>{
     h+=`<div class="meld${selMeld===i?' mSel':''}" onclick="clickMeld(${i})">`+
-       `<div class="meldHead">Grup ${i+1}</div>`+
-       displayOrder(m).map(t=>tileHtml(t,false)).join('')+'</div>';
+       `<div class="meldHead">${selMeld===i?'🎯 ':''}Grup ${i+1}</div>`+
+       displayOrder(m).map(t=>tileHtml(t,myTurn()&&!G.gameOver)).join('')+'</div>';
   });
   tableEl.innerHTML=h;
+  document.getElementById('tableLbl').textContent=
+    '🪨 Tauler'+(myTurn()&&!G.gameOver&&G.table.length?' — toca una fitxa per moure-la · toca «Grup N» per abocar-hi':'');
   // notificació de la pila
   document.getElementById('hint').textContent=
     'pila: '+G.pileCount+' fitxes · '+

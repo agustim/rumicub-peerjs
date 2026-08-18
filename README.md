@@ -37,9 +37,23 @@ de partides.
 - Accions per torn: **▶ Jugar** (fitxes seleccionades, opcionalment afegides a un
   grup del tauler), **⬇ Agafar de la pila** o **➡ Passar**.
 
-> ⚠️ **Simplificacions respecte al Rummikub oficial:** no es permet reordenar les
-> combinacions del tauler (partir grups, moure fitxes entre combinacions ni
-> recuperar un comodí), només s'hi poden afegir fitxes. Sense temporitzador.
+### Manipular el tauler
+
+Dins del teu torn, el tauler és interactiu:
+
+- **Toca una fitxa del tauler** per agafar-la (comodins inclosos) i
+  **toca la capçalera «Grup N»** per marcar on la vols abocar.
+- Pots **ampliar** grups i escales amb fitxes de la teva mà **o** del mateix
+  tauler, **moure** fitxes d'una combinació a una altra, i **fer combinacions
+  noves** mesclant fitxes pròpies amb les del tauler.
+- El joc **valida el tauler final**: si en moure fitxes algun grup queda en mal
+  estat (menys de 3 fitxes o combinació invàlida), la jugada es rebutja amb un
+  avís i res no canvia. Amb un sol gest pots, per exemple, resoldre un comodí
+  del mig d'una escala si el repairs en el mateix moviment.
+
+> ⚠️ **Simplificacions respecte al Rummikub oficial:** no hi ha temporitzador i
+> totes les manipulacions es confirmen d'un sol cop (no es poden deixar fitxes a
+> mig fer): o acaben en un tauler vàlid, o es rebutgen.
 
 ## 🚀 Desplegament a GitHub Pages
 
