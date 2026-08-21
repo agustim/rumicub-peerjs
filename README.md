@@ -5,7 +5,7 @@ funciona des del mòbil, feta amb **PeerJS**: les dades del joc viatgen **direct
 entre els dispositius (P2P)**. No cal registrar-se, no hi ha comptes ni servidor
 de partides.
 
-- 🔗 Tot el joc és un únic `index.html` (client pur, sense backend)..
+- 🔗 Tot el joc és un únic `index.html` (client pur, sense backend).
 - 🔒 La partida és P2P i xifrada (WebRTC DTLS) entre els jugadors.
 - 📱 Dissenyat per al mòbil (tàctil, sense zoom accidental).
 
