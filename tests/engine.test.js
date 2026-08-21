@@ -168,6 +168,29 @@ function browserContext() {
   return s;
 }
 
+test('el bot decideix una jugada sobre un estat sincronitzat (ús real a l\'app)', () => {
+  const bot = require('../bot.js');
+  const engine = R.createGame({ players: 4, seed: 7 });
+  // mà de l'amfitrió amb un grup de 13 ≥ 30 → el bot ha de proposar-lo
+  const hands = [
+    [{ id: 'a', v: 13, c: 0 }, { id: 'b', v: 13, c: 1 }, { id: 'c', v: 13, c: 2 }, { id: 'x', v: 1, c: 0 }],
+    [{ id: 'd', v: 5, c: 1 }, { id: 'e', v: 6, c: 1 }, { id: 'f', v: 7, c: 1 }, { id: 'y', v: 9, c: 0 }],
+    [],
+    [],
+  ];
+  engine.sync({ players: 4, hands, table: [], pile: [{ id: 'p', v: 2, c: 3 }], turn: 0,
+                initial: [false, false, false, false], gameOver: false, winner: null });
+  const move = bot.chooseMove(0, engine, bot.DEFAULT_WEIGHTS);
+  assert.strictEqual(move.type, 'play');          // obertura de 39
+  assert.ok((move.tiles || []).length === 3);
+  // sobre un tauler obert: el bot sap jugar fitxes de la mà (respostes vàlides)
+  const table = [[{ id: 'r1', v: 5, c: 1 }, { id: 'r2', v: 6, c: 1 }, { id: 'r3', v: 7, c: 1 }]];
+  engine.sync({ players: 4, hands, table, pile: [], turn: 1,
+                initial: [true, true, false, false], gameOver: false, winner: null });
+  const m2 = bot.chooseMove(1, engine, bot.DEFAULT_WEIGHTS);
+  assert.ok(['play', 'draw', 'pass'].includes(m2.type));
+});
+
 test('paritat navegador↔Node: el joc de la pàgina coincideix amb l\'enginy', () => {
   const b = browserContext();
   // mateixes regles disponibles

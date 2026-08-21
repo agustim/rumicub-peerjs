@@ -4,11 +4,20 @@
    de jugades legals (legalPlays). Puntua cada moviment amb uns pesos
    ajustables; els pesos es poden optimitzar amb fit-weights.js.
 
-   Ús:
+   Funciona a Node (require) i al navegador (exposa global RummyBot),
+   on l'amfitrió l'usa per decidir les jugades dels llocs "màquina".
+
+   Ús (Node):
      const { createGame } = require('./game.js');
      const { chooseMove, playGame } = require('./bot.js');
+   Ús (navegador): es carrega després de game.js → window.RummyBot
    ═══════════════════════════════════════════════════════════════ */
-const R = require('./game.js');
+(function (root, factory) {
+  const api = factory(root ? root.Rummy : null);
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  if (root) root.RummyBot = api;
+})(typeof window !== 'undefined' ? window : null, function (R) {
+  if (!R && typeof require === 'function') R = require('./game.js');
 
 const DEFAULT_WEIGHTS = {
   perTile: 6,          // guany per cada fitxa de la mà que poses al tauler
@@ -108,4 +117,5 @@ function playGame(opts) {
   return { winner: st.winner, gameOver: st.gameOver && turns < maxTurns, turns, melds: st.table.length, winType };
 }
 
-module.exports = { DEFAULT_WEIGHTS, scoreMove, chooseMove, playGame };
+  return { DEFAULT_WEIGHTS, scoreMove, chooseMove, playGame };
+});

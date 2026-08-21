@@ -401,6 +401,15 @@
 
     api.legalPlays = legalPlays;
 
+    /* Sincronitza l'estat intern del motor amb un estat extern (perquè un bot
+       pugui DECIDIR una jugada sobre una partida real en curs a l'app: el host
+       li passa el tauler, les mans (mirall), la pila i el torn actuals). */
+    api.sync = function (s) {
+      st.players = s.players; st.hands = s.hands; st.table = s.table;
+      st.pile = s.pile; st.turn = s.turn; st.initial = s.initial;
+      st.gameOver = s.gameOver; st.winner = s.winner;
+    };
+
     return api;
   }
 

@@ -175,6 +175,43 @@ test('partida completa: amfitrió + convidat juguen i els taulells es sincronitz
   }
 });
 
+test('partida amb bots: 1 humà + 3 màquines juguen i el torn torna a l\'amfitrió', async ({ browser }) => {
+  test.setTimeout(90000);
+  // només cal l'amfitrió: els 3 bots viuen al seu navegador
+  const host = await openPlayer(browser, { width: 1280, height: 800 });
+  try {
+    await host.page.goto('/');
+    await expect(host.page.locator('#btnCreate')).toBeVisible();
+    await host.page.click('#btnCreate');
+    await expect(host.page.locator('#lobby')).toBeVisible({ timeout: 25000 });
+    await host.page.waitForFunction(() => String(myCode).length === 4, null, { timeout: 25000 });
+
+    // 4 jugadors en total, 3 de màquina
+    await host.page.click('#maxBtns button:has-text("4")');
+    await host.page.click('#botBtns button:has-text("3")');
+    // amb només l'amfitrió present, el botó de començar ja és actiu (1 humà i prou)
+    await expect(host.page.locator('#btnStart')).toBeEnabled();
+
+    await host.page.click('#btnStart');
+    await expect(host.page.locator('#gameCard')).toBeVisible({ timeout: 30000 });
+    await expect(host.page.locator('#rack .tile')).toHaveCount(14, { timeout: 20000 });
+
+    const setup = await host.page.evaluate(() => ({ pl: G.plCount, bots: G.bots.length, over: G.gameOver }));
+    expect(setup.pl).toBe(4);
+    expect(setup.bots).toBe(3);
+    expect(setup.over).toBe(false);
+
+    // l'amfitrió agafa una fitxa → el torn ha de passar pels 3 bots i tornar-li
+    await host.page.click('#btnDraw');
+    await expect
+      .poll(async () => host.page.evaluate(() => ({ t: G.turn, over: G.gameOver })), { timeout: 25000 })
+      .toEqual({ t: 0, over: false });
+    console.log('  ✅  1 humà + 3 bots: els 3 bots han jugat el seu torn i el joc continua');
+  } finally {
+    await host.ctx.close();
+  }
+});
+
 test('la pantalla d\'inici carrega i respecta la maquetació al mòbil', async ({ page }) => {
   await page.setViewportSize(GUEST_VIEWPORT);
   await page.goto('/');

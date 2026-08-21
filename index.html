@@ -15,6 +15,7 @@
 -->
 <script src="vendor/peerjs.min.js"></script>
 <script src="game.js"></script>
+<script src="bot.js"></script>
 <script>
 // Configuració del servidor de senyalització.
 // Es pot editar des de la ⚙️ de la pantalla d'inici i es desa al navegador.
@@ -110,6 +111,8 @@ try{
     <div id="hostCtrl" style="display:none;text-align:center;margin:10px 0;">
       <div class="lbl">Quants jugadors? <span class="dim" style="font-size:12px;">(5-8 usa 2 jocs de fitxes)</span></div>
       <div class="row" id="maxBtns"></div>
+      <div class="lbl">🤖 Jugadors de la màquina <span class="dim" style="font-size:12px;">(la resta del lloc són bots, sense mòbil)</span></div>
+      <div class="row" id="botBtns"></div>
     </div>
     <p style="text-align:center;margin:10px 0;">
       <button id="btnStart" onclick="hostStart()" class="ok">🚀 Començar partida</button>
@@ -147,13 +150,18 @@ let me=0;                  // el meu índex de jugador (0 = amfitrió)
 let plCount=1;             // nº de jugadors de la partida quan comença
 let started=false;         // amfitrió: la partida ja ha començat?
 let maxPlayers=2;          // amfitrió: capacitat del lobby
+let botCount=0;            // amfitrió: quants llocs són de la màquina (bots)
+let bots=[];               // índexs dels llocs-bot un cop comença la partida
 let rack=[];               // la teva mà
 const sel=new Set();       // fitxes seleccionades (ids)
 let selMeld=null;          // índex del grup del tauler seleccionat
 let pendingPlay=[];
-const G={table:[], turn:0, pileCount:0, initial:[], gameOver:false, winner:null, plCount:1};
+const G={table:[], turn:0, pileCount:0, initial:[], gameOver:false, winner:null, plCount:1, bots:[]};
 let pile=[];               // pila d'extracció: només en el host
 let plConn=[null];         // [amfitrió] plConn[i] = connexió del jugador i (i>0 que no sigui host)
+let R=[];                  // [amfitrió] mirall de les mans de TOTS els llocs (indispensable per als bots)
+let engine=null;           // [amfitrió] motor headless perquè els bots decideixin les jugades
+let botTimer=null;         // [amfitrió] temporitzador del torn d'un bot
 
 
 /* ══════════ Connexió PEERJS ══════════ */
@@ -187,14 +195,16 @@ let connTimer=null;
 function clearConnTimer(){ if(connTimer){ clearTimeout(connTimer); connTimer=null; } }
 
 /* ══════════ Lobby i inici de partida ══════════ */
-function playerName(i){ return i===0?'Amfitrió':'Jugador '+i; }
+function playerName(i){ if(i===0) return 'Amfitrió'; if((G.bots||[]).includes(i)) return '🤖 Bot '+i; return 'Jugador '+i; }
 function countPresent(){ let n=1; for(let i=1;i<plConn.length;i++) if(plConn[i]&&plConn[i].open) n++; return n; }
+function lobbyIsBot(i){ return i>=maxPlayers-botCount; }   // al lobby els bots són els últims llocs
 function currentRoster(){
   const r=[];
-  for(let i=0;i<maxPlayers;i++) r.push(i===0?'Amfitrió':((plConn[i]&&plConn[i].open)?playerName(i):''));
+  for(let i=0;i<maxPlayers;i++)
+    r.push(i===0?'Amfitrió':(lobbyIsBot(i)?'🤖 Bot '+i:((plConn[i]&&plConn[i].open)?playerName(i):'')));
   return r;
 }
-function freeSlot(){ for(let i=1;i<maxPlayers;i++) if(!plConn[i]) return i; return -1; }
+function freeSlot(){ for(let i=1;i<maxPlayers-botCount;i++) if(!plConn[i]) return i; return -1; }  // només llocs humans
 function hostSend(i,msg){ const c=plConn[i]; if(c&&c.open) c.send(msg); }
 
 function showLobby(isHost){
@@ -208,11 +218,32 @@ function renderLobbyHost(){
   document.getElementById('lobbyList').innerHTML=
     r.map((n,i)=> i===0 ? ('🖥 '+n) : (n?('● '+n+' 🟢'):('○ Jugador '+i+' (lliure)'))).join('<br>');
   buildMaxBtns();
-  document.getElementById('btnStart').disabled = countPresent()<2;
-  document.getElementById('lobbyMsg').textContent= countPresent()<2
-    ? 'Comparteix el codi perquè s\'hi uneixin els altres jugadors.'
-    : countPresent()+' jugadors a punt. Prem per començar!';
-  if(countPresent()>4) document.getElementById('lobbyMsg').textContent+=' (s\'usaran 2 jocs de fitxes)';
+  buildBotBtns();
+  const need=maxPlayers-botCount;   // humans que calen (inclòs l'amfitrió)
+  document.getElementById('btnStart').disabled = countPresent()<need;
+  const botNote=botCount?(' 🤖 '+botCount+' a la màquina'):'';
+  document.getElementById('lobbyMsg').textContent= countPresent()<need
+    ? 'Esperant '+need+' jugador'+((need>1)?'s':'')+' humà'+((need>1)?'s':'')+' (n\'hi ha '+countPresent()+').'+botNote
+    : (maxPlayers+' jugadors a punt ('+countPresent()+' humà'+((countPresent()>1)?'s':'')+', '+botCount+' màquina). Prem per començar!');
+  if(maxPlayers>4) document.getElementById('lobbyMsg').textContent+=' (s\'usaran 2 jocs de fitxes)';
+}
+function buildBotBtns(){
+  const wrap=document.getElementById('botBtns'); if(!wrap) return;
+  wrap.innerHTML='';
+  for(let n=0;n<=maxPlayers-1;n++){
+    const b=document.createElement('button');
+    b.textContent=n; b.className='mini';
+    b.style.background=(n===botCount)?'#b3402c':'';
+    ((n)=>{ b.onclick=()=>setBotCount(n); })(n);
+    wrap.appendChild(b);
+  }
+}
+function setBotCount(n){
+  botCount=Math.max(0, Math.min(n, maxPlayers-1));
+  // tanca qualsevol convidat que hagi quedat a un lloc que ara és de màquina
+  const hs=maxPlayers-botCount;
+  for(let i=plConn.length-1;i>=hs;i--){ if(plConn[i]){ try{ plConn[i].close(); }catch(_){} plConn[i]=null; } }
+  refreshLobby();
 }
 function renderLobbyGuest(roster){
   const list=document.getElementById('lobbyList');
@@ -239,6 +270,7 @@ function buildMaxBtns(){
 }
 function setMaxPlayers(n){
   maxPlayers=n;
+  if(botCount>maxPlayers-1) botCount=maxPlayers-1;
   // tanca qualsevol convidat fora del nou límit
   for(let i=plConn.length-1;i>=maxPlayers;i--){ if(plConn[i]){ try{ plConn[i].close(); }catch(_){} plConn[i]=null; } }
   refreshLobby();
@@ -362,30 +394,39 @@ function guestJoin(){
 /* L'amfitrió reparteix i comença la partida */
 function hostStart(){
   if(role!=='host') return;
-  const present=[0];
-  for(let i=1;i<plConn.length;i++) if(plConn[i]&&plConn[i].open) present.push(i);
-  if(present.length<2){ setMsg('Cal que s\'uneixi almenys 1 jugador per començar.'); return; }
-  plCount=present.length;
-  // remapa les connexions a índexs 0..plCount-1 (0 = l'amfitrió)
-  const conns=present.map(i=> i===0?null:plConn[i]);
+  const hs=maxPlayers-botCount;              // llocs humans (inclòs l'amfitrió)
+  const humans=[0];
+  for(let i=1;i<plConn.length;i++) if(plConn[i]&&plConn[i].open) humans.push(i);
+  if(humans.length<hs){ setMsg('Cal que hi hagi '+hs+' jugador(s) humà(s) per començar (ara n\'hi ha '+humans.length+').'); return; }
+  plCount=maxPlayers;                        // total = humans + bots
+  // remapa: humans als primers llocs (0 = l'amfitrió), bots als últims
+  const conns=Array(plCount).fill(null);
+  for(let h=0;h<hs;h++){ const idx=humans[h]; if(idx>0){ conns[h]=plConn[idx]; plConn[idx]=null; } }
   plConn=conns; plConn[0]=null;
+  bots=[]; for(let i=hs;i<plCount;i++) bots.push(i);
   started=true;
   G.table=[]; G.initial=new Array(plCount).fill(false);
-  G.turn=0; G.gameOver=false; G.winner=null; G.plCount=plCount;
+  G.turn=0; G.gameOver=false; G.winner=null; G.plCount=plCount; G.bots=bots;
   const sets = plCount>4?2:1;
   const deck=makeDeck(sets); shuffle(deck);
   const racks=[]; for(let p=0;p<plCount;p++) racks.push(deck.splice(0,14));
   pile=deck; G.pileCount=pile.length;
-  rack=racks[0];                                   // la meva mà
-  for(let p=1;p<plCount;p++)
+  rack=racks[0]; R=racks;                    // la meva mà + mirall de totes (per als bots)
+  for(let p=1;p<plCount;p++){
+    if(bots.includes(p)) continue;           // els bots no tenen cap connexió
     hostSend(p,{type:'init',player:p,plCount:plCount,sets:sets,rack:racks[p],state:pubState()});
+  }
+  engine=Rummy.createGame({players:plCount, sets:sets, seed:(Date.now()%0x7fffffff)||1, endWhenStuck:false});
   showGame(); render();
-  setMsg('🎲 Partida de '+plCount+' jugadors ('+(sets>1?'2 jocs de fitxes':'1 joc de fitxes')+'). Comença l\'Amfitrió: la primera jugada ha de fer 30 punts.');
+  setMsg('🎲 Partida de '+plCount+' jugadors ('+(sets>1?'2 jocs de fitxes':'1 joc de fitxes')+
+    (bots.length?(' · 🤖 a la màquina: '+bots.map(playerName).join(', ')):'')+
+    '). Comença l\'Amfitrió: la primera jugada ha de fer 30 punts.');
 }
+
 
 function pubState(){
   return {table:G.table,turn:G.turn,pileCount:G.pileCount,initial:G.initial,
-          gameOver:G.gameOver,winner:G.winner,plCount:G.plCount};
+          gameOver:G.gameOver,winner:G.winner,plCount:G.plCount,bots:G.bots||[]};
 }
 function broadcast(){ const st=pubState();
   for(let i=1;i<plConn.length;i++){ const c=plConn[i]; if(c&&c.open) c.send({type:'state',state:st}); }
@@ -402,26 +443,64 @@ function hostDisconnect(i){
   }
 }
 
+/* ══════════ Bots (llocs de la màquina) ══════════
+   Quan el torn arriba a un bot, el host decideix la seva jugada amb el mateix
+   motor i pesos de l'AI (engine + RummyBot.chooseMove) sobre l'estat real de la
+   partida, i l'aplica com si fos un jugador més, amb un petit retard per veure-ho. */
+function isBotSlot(i){ return started && bots.includes(i); }
+function scheduleBotTurns(){
+  if(botTimer){ clearTimeout(botTimer); botTimer=null; }
+  if(G.gameOver) return;
+  if(isBotSlot(G.turn)) botTimer=setTimeout(runBotTurn, 800);
+}
+function runBotTurn(){
+  botTimer=null;
+  if(G.gameOver||!isBotSlot(G.turn)) return;
+  const p=G.turn;
+  try{
+    engine.sync({players:G.plCount,hands:R,table:G.table,pile:pile,turn:G.turn,initial:G.initial,gameOver:G.gameOver,winner:G.winner});
+    const move=RummyBot.chooseMove(p,engine,RummyBot.DEFAULT_WEIGHTS);
+    if(move.type==='play'){
+      const res=tryPlay(move.tiles,move.target,p,move.take||[]);
+      if(res.ok){
+        const tiles=move.tiles||[];
+        R[p]=R[p].filter(t=>!tiles.some(x=>x.id===t.id));
+        if(tiles.length>0 && R[p].length===0){ G.gameOver=true; G.winner=p; }
+        else advance();
+      } else advance();     // jugada invàlida (no hauria de passar): passa el torn
+    } else if(move.type==='draw' && pile.length>0){
+      const t=pile.pop(); G.pileCount=pile.length; R[p].push(t);
+      advance();
+    } else advance();       // passa (normalment perquè la pila s'ha esgotat)
+  }catch(e){ console.error('[bot]',e); advance(); }
+  broadcast();
+  if(G.gameOver) setMsg('🏁 El '+playerName(G.winner)+' ha guanyat la partida!');
+  else setMsg('🤖 '+playerName(p)+' ha jugat. '+nextTurnMsg());
+  scheduleBotTurns();
+}
+
 /* ══════════ Missatges cap a l'amfitrió (pidx = jugador convidat que l'envia) ══════════ */
 function hostHandle(d,pidx){
   if(started && (pidx<=0 || !plConn[pidx])) return;   // només convidats presents
   if(d.type==='join'){ refreshLobby(); return; }
   if(d.type==='draw'){
     if(pile.length===0){ hostSend(pidx,{type:'drawResult',tile:null}); }
-    else { const t=pile.pop(); G.pileCount=pile.length; hostSend(pidx,{type:'drawResult',tile:t}); }
-    advance(); broadcast();
+    else { const t=pile.pop(); G.pileCount=pile.length; if(R[pidx]) R[pidx].push(t); hostSend(pidx,{type:'drawResult',tile:t}); }
+    advance(); broadcast(); scheduleBotTurns();
   }
   else if(d.type==='play'){
     const res=tryPlay(d.tiles,d.target,pidx,d.take);
     if(!res.ok){ hostSend(pidx,{type:'playAck',ok:false,reason:res.reason}); return; }
+    if(R[pidx] && (d.tiles||[]).length) R[pidx]=R[pidx].filter(t=>!(d.tiles||[]).some(x=>x.id===t.id));
     // El jugador guanya si, després de jugar, es queda sense fitxes de la mà
     if((d.tiles||[]).length>0 && d.rackN===d.tiles.length){ G.gameOver=true; G.winner=pidx; }
     else advance();
     hostSend(pidx,{type:'playAck',ok:true,state:pubState()});
     broadcast();
     if(G.gameOver) setMsg('🏁 El '+playerName(pidx)+' ha guanyat la partida!');
+    scheduleBotTurns();
   }
-  else if(d.type==='pass'){ advance(); broadcast(); }
+  else if(d.type==='pass'){ advance(); broadcast(); scheduleBotTurns(); }
 }
 
 /* ══════════ Missatges cap al convidat ══════════ */
@@ -483,6 +562,7 @@ function clickPlay(){
     const res=tryPlay(handSel,selMeld,0,take);
     if(!res.ok){ setMsg(res.reason); return; }
     rack=rack.filter(t=>!sel.has(t.id));
+    R[0]=rack;
     const won = handSel.length>0 && rack.length===0;   // només si buides la mà amb fitxes pròpies
     sel.clear(); selMeld=null;
     if(won){ G.gameOver=true; G.winner=0; }
@@ -490,6 +570,7 @@ function clickPlay(){
     broadcast();
     if(G.gameOver) setMsg('🎉🎉 Has guanyat! Enhorabona!');
     else setMsg('✅ Ben fet! '+nextTurnMsg());
+    scheduleBotTurns();
   }
 }
 function clickDraw(){
@@ -499,7 +580,7 @@ function clickDraw(){
   if(role==='guest'){ conn.send({type:'draw',player:me}); }
   else{
     rack.push(pile.pop()); G.pileCount=pile.length;
-    advance(); broadcast();
+    advance(); broadcast(); scheduleBotTurns();
     setMsg('⬇ Has agafat una fitxa. '+nextTurnMsg());
   }
 }
@@ -507,7 +588,7 @@ function clickPass(){
   if(G.gameOver||!myTurn()) return;
   sel.clear(); selMeld=null;
   if(role==='guest'){ conn.send({type:'pass',player:me}); setMsg('✅ Has passat torn.'); }
-  else{ advance(); broadcast(); setMsg('✅ Has passat torn. '+nextTurnMsg()); }
+  else{ advance(); broadcast(); scheduleBotTurns(); setMsg('✅ Has passat torn. '+nextTurnMsg()); }
 }
 
 /* ══════════ UI ══════════ */

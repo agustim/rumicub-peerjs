@@ -37,6 +37,15 @@ de partides.
 - Accions per torn: **▶ Jugar** (fitxes seleccionades, opcionalment afegides a un
   grup del tauler), **⬇ Agafar de la pila** o **➡ Passar**.
 
+### 🤖 Jugar contra la màquina (bots)
+
+- Al lobby, a més de *quants jugadors*, tria **🤖 Jugadors de la màquina**
+  (de 0 fins a jugadors−1). Els llocs de màquina no necessiten cap dispositiu:
+  viuen al navegador de l'amfitrió i juguen sols amb el mateix motor i pesos
+  que `bot.js`.
+- Exemple: **4 jugadors + 3 de màquina** = una persona (l'amfitrió) contra 3 bots.
+- Només et cal obrir la pàgina des dels dispositius dels jugadors **humans**.
+
 ### Manipular el tauler
 
 Dins del teu torn, el tauler és interactiu:
