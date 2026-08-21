@@ -66,12 +66,12 @@ El repositori ja inclou `.github/workflows/deploy.yml`. Quan el pugis a `main`,
 GitHub Pages es desplega automàticament. Només cal activar-lo una vegada:
 
 1. Puja aquest codi al teu repositori GitHub
-   (ex. `agustim/rumicub-peerjs`).
+   (ex. `agustim/rummikub-peerjs`).
 2. Al repositori: **Settings → Pages**.
 3. A **Build and deployment → Source** tria **"GitHub Actions"**.
 4. Fes un push a `main` (o prem **Deploy** a la pestanya **Actions**).
 5. La pàgina serà a: `https://<usuari>.github.io/<repo>/`
-   (ex. `https://agustim.github.io/rumicub-peerjs/`).
+   (ex. `https://agustim.github.io/rummikub-peerjs/`).
 
 ### Opció B: sense workflow (desplegament des de la branca)
 
@@ -82,7 +82,7 @@ Si prefereixes no tocar res de GitHub Actions:
 3. Guarda; en un minut la pàgina és en línia a la mateixa URL que l'Opció A.
 
 > El camí `vendor/peerjs.min.js` és **relatiu**, així que funciona tant a
-> `https://usuari.github.io/rumicub-peerjs/` com si algun dia ho poses a un
+> `https://usuari.github.io/rummikub-peerjs/` com si algun dia ho poses a un
 > domini propi.
 
 ## 🧪 Provar en local
