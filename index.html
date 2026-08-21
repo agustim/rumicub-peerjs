@@ -625,7 +625,7 @@ function render(){
   });
   tableEl.innerHTML=h;
   document.getElementById('tableLbl').textContent=
-    '🪨 Tauler'+(myTurn()&&!G.gameOver&&G.table.length?' — toca una fitxa per moure-la · toca «Grup N» per abocar-hi':'');
+    '🪨 Tauler'+(myTurn()&&!G.gameOver&&G.table.length?' — toca fitxes per moure-les · «Grup N» per abocar-hi · sense destí = reorganitza':'');
   // notificació de la pila
   document.getElementById('hint').textContent=
     'pila: '+G.pileCount+' fitxes · '+

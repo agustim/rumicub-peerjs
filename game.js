@@ -138,6 +138,51 @@
   }
 
   /* ────────────────────────────────────────────────────────────────
+     tryRearrange(persist, loose) — reorganització automàtica.
+     Quan una jugada de manipulació (amb fitxes preses del tauler) no forma
+     cap combinació per si sola, intenta repartir-les entre els melds que ja
+     hi ha a taula (combinacions VÀLIDES si s'allarguen) o bé en combinacions
+     noves, de manera que el tauler FINAL sigui vàlid. Ex:  [13,13,X][9..12]
+     + 11 de la mà → 13 es va a l'escala i {11,X,13} fa escala nova.
+
+     Retorna el tauler final (array de melds) o null si no hi ha manera.
+     ──────────────────────────────────────────────────────────────── */
+  function tryRearrange(persist, loose) {
+    if (loose.length > 8) return null;
+    const pool = [];           // fitxes reservades per a combinacions noves
+    let budget = 120000;
+    function rec(k) {
+      if (--budget <= 0) return null;
+      if (k === loose.length) {
+        const parts = bestPartition(pool);
+        if (parts === null) return null;
+        const final = [];
+        for (const m of persist) if (m.length) final.push(m.slice());
+        final.push(...parts.map(p => p.slice()));
+        return final;
+      }
+      const t = loose[k];
+      // branca A: aferrar-la a un meld existent (només si el manté vàlid)
+      for (let mi = 0; mi < persist.length; mi++) {
+        const m = persist[mi];
+        if (validMeld(m.concat(t))) {
+          m.push(t);
+          const r = rec(k + 1);
+          if (r !== null) return r;
+          m.pop();
+        }
+      }
+      // branca B: reservar-la per a combinacions noves
+      pool.push(t);
+      const r2 = rec(k + 1);
+      if (r2 !== null) return r2;
+      pool.pop();
+      return null;
+    }
+    return rec(0);
+  }
+
+  /* ────────────────────────────────────────────────────────────────
      resolvePlay(state, who, tiles, target, take)
      Resol una jugada de manera atòmica (mateixes regles que l'app):
 
@@ -156,7 +201,7 @@
     if (!state.initial[who] && (take.length > 0 || target !== null))
       return { ok: false, reason: 'La primera jugada només es pot fer amb fitxes de la teva mà (30 punts), sense tocar el tauler.' };
     const initial = state.initial.slice();
-    const tb = state.table.map(m => m.map(cloneTile));
+    let tb = state.table.map(m => m.map(cloneTile));
     const moving = [];
     for (const tk of take) {
       const m = tb[tk.from];
@@ -173,13 +218,22 @@
     } else if (combined.length) {
       if (combined.length > 8) return { ok: false, reason: 'Massa fitxes per fer combinacions noves d\'un sol cop (màx. 8).' };
       const parts = bestPartition(combined);
-      if (!parts) return { ok: false, reason: 'Aquesta combinació no és vàlida: necessites grups o escales de 3 fitxes com a mínim.' };
-      if (!initial[who]) {
-        const sum = parts.reduce((s, m) => s + meldScore(m), 0);
-        if (sum < 30) return { ok: false, reason: 'La primera jugada ha de sumar 30 punts com a mínim (ara en sumes ' + sum + ').' };
-        initial[who] = true;
+      if (parts) {
+        if (!initial[who]) {
+          const sum = parts.reduce((s, m) => s + meldScore(m), 0);
+          if (sum < 30) return { ok: false, reason: 'La primera jugada ha de sumar 30 punts com a mínim (ara en sumes ' + sum + ').' };
+          initial[who] = true;
+        }
+        tb.push(...parts);
+      } else if (take.length > 0) {
+        // Reorganització de fitxes preses del tauler: es reparteixen entre els
+        // melds existents i/o combinacions noves (tauler final vàlid).
+        const final = tryRearrange(tb.filter(m => m.length > 0), combined);
+        if (!final) return { ok: false, reason: 'Aquesta jugada deixa algun grup del tauler en mal estat. Desfés la manipulació o distribuïu-ho altrament.' };
+        tb = final;
+      } else {
+        return { ok: false, reason: 'Aquesta combinació no és vàlida: necessites grups o escales de 3 fitxes com a mínim.' };
       }
-      tb.push(...parts);
     }
     for (const m of tb) { if (m.length && !validMeld(m)) return { ok: false, reason: 'En moure fitxes, algun grup del tauler queda en mal estat. Desfés la manipulació.' }; }
     return { ok: true, state: { table: tb.filter(m => m.length > 0), initial } };

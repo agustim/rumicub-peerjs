@@ -168,6 +168,44 @@ function browserContext() {
   return s;
 }
 
+test('reorganització: [13,13,X] + escala 9..12 i un 11 vermell a la mà → 13 a l\'escala i [11,X,13] nou (el cas de l\'usuari)', () => {
+  const J = { id: 'J', joker: true };
+  const st = {
+    table: [
+      [{ id: 'g13b', v: 13, c: 2 }, { id: 'g13r', v: 13, c: 0 }, J],
+      [{ id: 'c', v: 9, c: 2 }, { id: 'd', v: 10, c: 2 }, { id: 'e', v: 11, c: 2 }, { id: 'f', v: 12, c: 2 }],
+    ],
+    initial: [true, false],
+  };
+  const res = R.resolvePlay(st, 0, [{ id: 'h', v: 11, c: 0 }], null,
+    [{ from: 0, id: 'g13b' }, { from: 0, id: 'g13r' }, { from: 0, id: 'J' }]);
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.state.table.length, 2);
+  const run = res.state.table.find(m => m.some(t => t.id === 'c'));   // escala blava
+  assert.strictEqual(run.length, 5);
+  assert.strictEqual(R.meldScore(run), 55);
+  const nm = res.state.table.find(m => m.some(t => t.id === 'h'));    // escala vermella nova
+  assert.strictEqual(nm.length, 3);
+  const ji = nm.findIndex(t => t.joker);
+  assert.strictEqual(R.meldValues(nm)[ji], 12);   // el comodí fa de 12, entre 11 i 13
+  assert.strictEqual(R.meldScore(nm), 36);
+  assert.ok(res.state.table.every(m => R.validMeld(m)));
+});
+
+test('reorganització: es refusa quan és impossible deixar el tauler vàlid', () => {
+  // grup complet de 3s: treure'n un i jugar-lo amb una fitxa solta qualsevol (5)
+  // no es pot repartir sense deixar el grup malmès ni cap combinació nova
+  const st = {
+    table: [[
+      { id: 'a', v: 3, c: 2 }, { id: 'b', v: 3, c: 0 }, { id: 'c', v: 3, c: 1 }, { id: 'd', v: 3, c: 3 },
+    ]],
+    initial: [true],
+  };
+  const res = R.resolvePlay(st, 0, [{ id: 'h', v: 5, c: 0 }], null, [{ from: 0, id: 'd' }]);
+  assert.strictEqual(res.ok, false);
+  assert.ok((res.reason || '').includes('mal estat'));
+});
+
 test('el bot decideix una jugada sobre un estat sincronitzat (ús real a l\'app)', () => {
   const bot = require('../bot.js');
   const engine = R.createGame({ players: 4, seed: 7 });
