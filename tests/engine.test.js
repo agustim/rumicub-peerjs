@@ -192,6 +192,34 @@ test('reorganització: [13,13,X] + escala 9..12 i un 11 vermell a la mà → 13 
   assert.ok(res.state.table.every(m => R.validMeld(m)));
 });
 
+test('reorganització: partir una escala per aprofitar-ne un número ([1..7] → [1,2,3],[5,6,7],[4,4,4],[4,4,4])', () => {
+  const r4 = { id: 'r4', v: 4, c: 2 };
+  const st = {
+    table: [[
+      { id: 'r1', v: 1, c: 2 }, { id: 'r2', v: 2, c: 2 }, { id: 'r3', v: 3, c: 2 },
+      r4,
+      { id: 'r5', v: 5, c: 2 }, { id: 'r6', v: 6, c: 2 }, { id: 'r7', v: 7, c: 2 },
+    ]],
+    initial: [true],
+  };
+  const hand = [
+    { id: 'h0', v: 4, c: 0 }, { id: 'h1', v: 4, c: 1 }, { id: 'h2', v: 4, c: 3 },
+    { id: 'h3', v: 4, c: 0 }, { id: 'h4', v: 4, c: 1 },
+  ];
+  const res = R.resolvePlay(st, 0, hand, null, [{ from: 0, id: 'r4' }]);
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.state.table.length, 4);
+  // dues escales curtes 1..3 i 5..7
+  const scores = res.state.table.map(m => R.meldScore(m)).sort((a, b) => a - b);
+  assert.deepStrictEqual(scores, [6, 12, 12, 18]);
+  // dues escales i dos grups de 4s, tot vàlid
+  assert.strictEqual(res.state.table.filter(m => R.validRun(m)).length, 2);
+  assert.strictEqual(res.state.table.filter(m => R.validGroup(m)).length, 2);
+  assert.ok(res.state.table.every(m => R.validMeld(m)));
+  // el 4 de l'escala ja no hi és
+  assert.ok(res.state.table.every(m => !m.includes(r4)));
+});
+
 test('reorganització: es refusa quan és impossible deixar el tauler vàlid', () => {
   // grup complet de 3s: treure'n un i jugar-lo amb una fitxa solta qualsevol (5)
   // no es pot repartir sense deixar el grup malmès ni cap combinació nova

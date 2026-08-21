@@ -138,48 +138,79 @@
   }
 
   /* ────────────────────────────────────────────────────────────────
-     tryRearrange(persist, loose) — reorganització automàtica.
+     tryRearrange(fixed, bags, loose) — reorganització automàtica.
      Quan una jugada de manipulació (amb fitxes preses del tauler) no forma
-     cap combinació per si sola, intenta repartir-les entre els melds que ja
-     hi ha a taula (combinacions VÀLIDES si s'allarguen) o bé en combinacions
-     noves, de manera que el tauler FINAL sigui vàlid. Ex:  [13,13,X][9..12]
-     + 11 de la mà → 13 es va a l'escala i {11,X,13} fa escala nova.
+     cap combinació per si sola, busca un tauler FINAL vàlid repartint:
+
+       fixed  → melds que NO s'han tocat (només poden rebre fitxes a sobre)
+       bags   → melds dels quals s'ha tret alguna fitxa (es poden PARTIR en
+                combinacions vàlides i poden absorbir fitxes soltes)
+       loose  → fitxes preses + fitxes de la mà
+
+     Cada fitxa de cada bag i cada fitxa solta ha d'acabar dins d'un meld
+     vàlid; els melds fixed resten intactes (o s'allarguen vàlidament).
+     Exemples que resol:
+       • [13,13,X][9..12] + 11 → [9..13] i [11,X,13]
+       • [1,2,3,4,5,6,7] + 6 quatres a la mà → [1,2,3],[5,6,7],[4,4,4],[4,4,4]
 
      Retorna el tauler final (array de melds) o null si no hi ha manera.
      ──────────────────────────────────────────────────────────────── */
-  function tryRearrange(persist, loose) {
-    if (loose.length > 8) return null;
-    const pool = [];           // fitxes reservades per a combinacions noves
-    let budget = 120000;
+  function tryRearrange(fixed, bags, loose) {
+    const n = loose.length;
+    if (n + bags.length > 12) return null;
+    const nF = fixed.length, nB = bags.length;
+    const NEW = nF + nB;
+    const assigned = new Array(n).fill(NEW);
+    let budget = 600000;
     function rec(k) {
-      if (--budget <= 0) return null;
-      if (k === loose.length) {
-        const parts = bestPartition(pool);
-        if (parts === null) return null;
+      if (--budget <= 0) throw 0;
+      if (k === n) {
+        // els melds fixed han de ser vàlids (amb els que hem hi afegit)
+        for (const m of fixed) if (m.length && !validMeld(m)) return null;
+        const bagPools = bags.map(b => b.slice());
+        const newPool = [];
+        for (let i = 0; i < n; i++) {
+          const d = assigned[i];
+          if (d >= nF && d < NEW) bagPools[d - nF].push(loose[i]);
+          else if (d === NEW) newPool.push(loose[i]);
+        }
         const final = [];
-        for (const m of persist) if (m.length) final.push(m.slice());
-        final.push(...parts.map(p => p.slice()));
+        for (const m of fixed) if (m.length) final.push(m.slice());
+        for (const bp of bagPools) {
+          if (!bp.length) continue;
+          const parts = bestPartition(bp);
+          if (parts === null) return null;
+          final.push(...parts.map(p => p.slice()));
+        }
+        const np2 = bestPartition(newPool);
+        if (np2 === null) return null;
+        final.push(...np2.map(p => p.slice()));
         return final;
       }
       const t = loose[k];
-      // branca A: aferrar-la a un meld existent (només si el manté vàlid)
-      for (let mi = 0; mi < persist.length; mi++) {
-        const m = persist[mi];
+      // branca A: aferrar-la a un meld fixed (només si el manté vàlid)
+      for (let f = 0; f < nF; f++) {
+        const m = fixed[f];
         if (validMeld(m.concat(t))) {
-          m.push(t);
+          m.push(t); assigned[k] = f;
           const r = rec(k + 1);
           if (r !== null) return r;
           m.pop();
         }
       }
-      // branca B: reservar-la per a combinacions noves
-      pool.push(t);
+      // branca B: abocar-la a un bag (s'haurà de repartir en melds vàlids)
+      for (let b = 0; b < nB; b++) {
+        assigned[k] = nF + b;
+        const r = rec(k + 1);
+        if (r !== null) return r;
+      }
+      // branca C: reservar-la per a combinacions noves
+      assigned[k] = NEW;
       const r2 = rec(k + 1);
       if (r2 !== null) return r2;
-      pool.pop();
       return null;
     }
-    return rec(0);
+    try { return rec(0); } catch (_) { return null; }
   }
 
   /* ────────────────────────────────────────────────────────────────
@@ -217,22 +248,31 @@
       tb[target] = dest.concat(combined);
     } else if (combined.length) {
       if (combined.length > 8) return { ok: false, reason: 'Massa fitxes per fer combinacions noves d\'un sol cop (màx. 8).' };
-      const parts = bestPartition(combined);
-      if (parts) {
+      if (take.length === 0) {
+        // Només fitxes de la mà → combinacions noves (o l'obertura de 30 punts)
+        const parts = bestPartition(combined);
+        if (!parts) return { ok: false, reason: 'Aquesta combinació no és vàlida: necessites grups o escales de 3 fitxes com a mínim.' };
         if (!initial[who]) {
           const sum = parts.reduce((s, m) => s + meldScore(m), 0);
           if (sum < 30) return { ok: false, reason: 'La primera jugada ha de sumar 30 punts com a mínim (ara en sumes ' + sum + ').' };
           initial[who] = true;
         }
         tb.push(...parts);
-      } else if (take.length > 0) {
-        // Reorganització de fitxes preses del tauler: es reparteixen entre els
-        // melds existents i/o combinacions noves (tauler final vàlid).
-        const final = tryRearrange(tb.filter(m => m.length > 0), combined);
+      } else {
+        // Reorganització de manipular el tauler: els melds dels quals s'ha tret
+        // una fitxa es poden partir/repartir (bags); els intactes només reben
+        // (fixed); les fitxes soltes (preses + de la mà) van allà on calgui.
+        // El tauler FINAL sempre ha de ser vàlid.
+        const touched = new Set(take.map(tk => tk.from));
+        const fixed = [];
+        const bags = [];
+        for (let i = 0; i < tb.length; i++) {
+          if (!tb[i].length) continue;                 // buit → desapareix del tauler
+          (touched.has(i) ? bags : fixed).push(tb[i]);
+        }
+        const final = tryRearrange(fixed, bags, combined);
         if (!final) return { ok: false, reason: 'Aquesta jugada deixa algun grup del tauler en mal estat. Desfés la manipulació o distribuïu-ho altrament.' };
         tb = final;
-      } else {
-        return { ok: false, reason: 'Aquesta combinació no és vàlida: necessites grups o escales de 3 fitxes com a mínim.' };
       }
     }
     for (const m of tb) { if (m.length && !validMeld(m)) return { ok: false, reason: 'En moure fitxes, algun grup del tauler queda en mal estat. Desfés la manipulació.' }; }
