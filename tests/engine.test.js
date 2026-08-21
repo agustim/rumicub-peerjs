@@ -47,6 +47,19 @@ test('puntuació del comodí (el bug reportat per l\'usuari)', () => {
   assert.strictEqual(R.meldScore([{ id: 'a', v: 8, c: 0 }, { id: 'J', joker: true }, { id: 'b', v: 10, c: 0 }]), 27);
   // 9..13 amb comodí → 9+10+11+12+13 = 55
   assert.strictEqual(R.meldScore(runi(0, [9, 10, 11, 12, 13])), 55);
+  // ── bug dels comodins a les escales: mai al mig de números correlatius ──
+  // 6,7,8,C,9,10 → el comodí ha de valer 11 (a l'extrem), no un 9 duplicat
+  const jmid = [{ id: 'a', v: 6, c: 0 }, { id: 'b', v: 7, c: 0 }, { id: 'c', v: 8, c: 0 },
+                { id: 'J', joker: true }, { id: 'd', v: 9, c: 0 }, { id: 'e', v: 10, c: 0 }];
+  assert.strictEqual(R.meldScore(jmid), 51);                                    // 6+7+8+9+10+11
+  assert.deepStrictEqual([...new Set(R.meldValues(jmid))].sort((a, b) => a - b), [6, 7, 8, 9, 10, 11]);
+  assert.strictEqual(R.displayOrder(jmid).indexOf(jmid[3]), 5);                 // es pinta al final (★=11)
+  // estendre una fila que ja duia comodí al capdamunt: 6,7,8,C + 9 → C val 10
+  const jext = jmid.slice(0, 5);
+  assert.strictEqual(R.meldScore(jext), 40);
+  assert.strictEqual(R.displayOrder(jext).indexOf(jext[3]), 4);
+  // una escala NO pot tenir més de 13 fitxes (1..13 + comodí seria una 14a)
+  assert.ok(!R.validRun([...runi(0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]), { id: 'J', joker: true }]));
 });
 
 test('partició', () => {
@@ -165,6 +178,7 @@ test('paritat navegador↔Node: el joc de la pàgina coincideix amb l\'enginy', 
     '  (Rummy.makeDeck(1).length === 106) &&' +
     '  (meldScore([{id:"a",v:13,c:0},{id:"b",v:13,c:1},{id:"J",joker:true}]) === 39) &&' +
     '  (meldScore([{id:"a",v:5,c:0},{id:"b",v:6,c:0},{id:"J",joker:true}]) === 18) &&' +
+    '  (meldScore([{id:"a",v:6,c:0},{id:"b",v:7,c:0},{id:"c",v:8,c:0},{id:"J",joker:true},{id:"d",v:9,c:0},{id:"e",v:10,c:0}]) === 51) &&' +
     '  (validRun([{id:"a",v:1,c:0},{id:"b",v:2,c:0},{id:"c",v:3,c:0}])) &&' +
     '  (bestPartition([]).length === 0);',
   b);

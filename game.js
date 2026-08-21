@@ -49,7 +49,7 @@
   /* ---------- Validació de combinacions ---------- */
   function validRun(arr) {
     const reals = arr.filter(t => !t.joker);
-    if (arr.length < 3 || reals.length === 0) return false;
+    if (arr.length < 3 || arr.length > 13 || reals.length === 0) return false;
     if (new Set(reals.map(t => t.c)).size !== 1) return false;
     const vs = reals.map(t => t.v);
     if (new Set(vs).size !== vs.length) return false;
@@ -76,24 +76,37 @@
       const v = reals[0].v;
       return m.map(t => t.joker ? v : t.v);
     }
+    return inferRun(m);
+  }
+
+  /* Per a una ESCALA vàlida, assigna a cada comodí el valor que representa.
+     - Primer omple els forats interiors (valors que FALTEN entre el mínim i el màxim);
+     - els comodins sobrants estenen la fila pels EXTREMS, mai al mig d'un parell
+       de números correlatius (que crearia duplicats del tipus 6,7,8,C,9,10).
+     Determinista i sempre dins de [1,13]. */
+  function inferRun(m) {
     const L = m.length;
-    const vs = m.map(t => t.joker ? null : t.v);
-    for (let i = 0; i < L; i++) {
-      if (vs[i] === null) {
-        let lv = null; for (let j = i - 1; j >= 0; j--) { if (vs[j] !== null) { lv = vs[j] + (i - j); break; } }
-        let rv = null; for (let j = i + 1; j < L; j++) { if (vs[j] !== null) { rv = vs[j] - (j - i); break; } }
-        vs[i] = (lv !== null) ? lv : ((rv !== null) ? rv : 1);
-      }
+    const reals = m.filter(t => !t.joker).map(t => t.v).sort((a, b) => a - b);
+    const minV = reals[0], maxV = reals[reals.length - 1];
+    const j = L - reals.length;
+    const forced = [];
+    for (let v = minV + 1; v < maxV; v++) if (!reals.includes(v)) forced.push(v);
+    let surplus = j - forced.length;   // comodins que toca posar als extrems
+    let low = 0, high = 0;
+    if (surplus > 0) {
+      if (m[0] && m[0].joker) low = surplus; else high = surplus;
+      if (minV - low < 1) { low = Math.max(0, minV - 1); high = surplus - low; }      // ja no cabe cap avall
+      if (maxV + high > 13) { high = Math.max(0, 13 - maxV); low = surplus - high; }   // ja no cabe cap amunt
+      if (low + high < surplus) { low = Math.min(surplus, Math.max(0, minV - 1)); high = Math.min(surplus, Math.max(0, 13 - maxV)); }
     }
-    if (vs.some(v => v < 1 || v > 13)) {
-      const maxV = Math.max(...reals.map(t => t.v));
-      const start = Math.max(1, maxV - (L - 1));
-      const realSet = new Set(reals.map(t => t.v));
-      let s = start; const out = [];
-      for (const t of m) { if (!t.joker) { out.push(t.v); } else { while (realSet.has(s)) s++; out.push(s); s++; } }
-      return out;
-    }
-    return vs;
+    const start = minV - low;
+    const used = new Set(reals);
+    const leftovers = [];
+    for (let v = start; v < start + L && v <= 13; v++) if (!used.has(v)) leftovers.push(v);
+    const out = [];
+    let k = 0;
+    for (const t of m) out.push(t.joker ? (leftovers[k] !== undefined ? leftovers[k++] : 0) : t.v);
+    return out;
   }
   function meldScore(m) { return meldValues(m).reduce((a, b) => a + b, 0); }
 
