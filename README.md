@@ -170,9 +170,74 @@ bloquegen el P2P**. Consells:
 
 ```
 index.html            → el joc sencer (HTML + CSS + JS)
+game.js               → lògica compartida: regles + motor headless (navegador I Node)
 vendor/peerjs.min.js  → llibreria PeerJS 1.5.2 baixada localment (redundància davant caigudes de CDN)
+bot.js                → bot heurístic que juga amb el motor (decisió per pesos)
+selfplay.js           → juga milers de partides bot-vs-bot i mostra l'estadística
+fit-weights.js        → entrena els pesos del bot (el "model d'AI") → weights.json
+weights.json          → el model entrenat (pesos)
+tests/                → proves automàtiques (motor + E2E de navegador)
+playwright.config.js  → configuració de les proves E2E
+package.json          → scripts i dependències de desenvolupament
 .github/workflows/    → desplegament automàtic a GitHub Pages
 ```
+
+## 🤖 Provar el codi i entrenar l'AI
+
+Tota la lògica del joc viu ara a `game.js` i és **la mateixa** al navegador
+(`index.html` la carrega amb `<script src="game.js">`) i a Node (els scripts
+d'AI la fan servir amb `require('./game.js')`). Això garanteix que el bot juga
+**exactament** amb les mateixes regles que l'app.
+
+### Proves automàtiques
+
+```bash
+npm install                 # devDeps: @playwright/test i peerjs-server
+npm run test:engine         # 12 proves del motor («node --test») — sense dependències
+npm run e2e                 # proves E2E al navegador real (requereixen 2 serveis locals)
+```
+
+- `npm run test:engine` valida baralla, combinacions, **puntuació del comodí**
+  (el cas 13,13,comodí=39), obertura de 30, manipulació del tauler, el motor
+  headless, `legalPlays` + final de ronda, i la **paritat navegador↔Node**
+  (carrega `index.html` en un entorn simulat i comprova que juga igual).
+- `npm run e2e` obre **dos navegadors** (amfitrió d'escriptori + convidat mòbil),
+  crea la partida, el convidat s'hi uneix amb el codi, juguen diversos torns a
+  través de la UI real i es comprova que els **dos taulells es sincronitzen**
+  (el P2P reenvia l'estat) i que el **disseny mòbil** està actiu. Calen, en local:
+  1) `npm run e2e:server` (PeerServer a `:9000`) i 2) `python3 -m http.server 8080`.
+
+### El bot i l'entrenament del "model d'AI"
+
+El bot (`bot.js`) és heurístic: per cada torn enumera les jugades legals
+(`legalPlays` a `game.js`) i puntua cada una amb un vector de **pesos** que,
+en conjunt, són el **model**. `fit-weights.js` entrena aquests pesos per
+**auto-partides**: el candidat juga contra la base (mateixes llavors, rols
+canviats, en paral·lel amb el pool de workers) i es queden els pesos amb més
+victòries.
+
+```bash
+node selfplay.js --games 1000        # milers de partides bot-vs-bot, amb estadístiques
+node selfplay.js --all               # prova ràpida a 2, 3, 4 i 5 jugadors
+node selfplay.js --weights weights.json   # amb el model entrenat
+node fit-weights.js                  # reentrena → escriu weights.json (~2-4 min)
+```
+
+Sortida d'exemple de `selfplay.js` (100 partides, 4 workers):
+
+```
+=== selfplay · 2 jugadors · 100 partides (1.3s, 77 jocs/s) ===
+  jugador 0: 60 victòries (60.0%)
+  jugador 1: 40 victòries (40.0%)
+  acabades: 100/100 · per mà buida: 8 · per final de ronda: 92 · torns mitjà: 131
+```
+
+> El fitxer `weights.json` generat conté els pesos entrenats per auto-joc
+> (al repositori ja hi ha una versió entrenada: fan que el bot jugui fitxes una
+> mica més agressivament i guanyin **~51% vs. la base**, avaluat amb 400
+> partides). El model actual és heurístic de l'estil que vam acordar (etapes 1+2):
+> llegir més partides i pesos és barat; si algun dia vols més força, el següent
+> pas natural és un model apresa (lookahead o xarxa) reutilitzant el mateix motor.
 
 ## 📌 Limitacions i idees futures
 

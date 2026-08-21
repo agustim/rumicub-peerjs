@@ -1,0 +1,19 @@
+{
+  "weights": {
+    "perTile": 10.2,
+    "perMoved": 4,
+    "openBonus": 18,
+    "jokerPenalty": 9,
+    "ownJokerKept": 0,
+    "newMeldBonus": 1,
+    "drawPenalty": 1,
+    "winSoon": 2,
+    "passPenalty": 0,
+    "finishBonus": 15,
+    "tinyHandPass": 0
+  },
+  "winrate": 0.51,
+  "games_evaluated": 400,
+  "note": "Pesos del bot heurístic entrenats per auto-partides (fit-weights.js). Pesos no usats pel bot actual (drawPenalty, passPenalty, tinyHandPass, ownJokerKept) es conserven per compatibilitat.",
+  "date": "2026-08-21T08:34:38.300Z"
+}

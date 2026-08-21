@@ -1,0 +1,19 @@
+{
+  "name": "rummikub-peerjs",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rummikub per parells (PeerJS) jugable des del mòbil — amb bot d'AI i proves E2E",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "e2e:server": "peerjs --port 9000 --key peerjs",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
+    "test:engine": "node --test tests/engine.test.js",
+    "selfplay": "node selfplay.js",
+    "train": "node fit-weights.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.44.0",
+    "peerjs-server": "^1.5.0"
+  }
+}

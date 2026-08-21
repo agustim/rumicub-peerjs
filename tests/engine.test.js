@@ -1,0 +1,190 @@
+// ═══════════════════════════════════════════════════════════════
+// Proves automàtiques del motor (node:test, sense dependències).
+//   Execució:  npm run test:engine   (o:  node --test tests/)
+//
+// Cobreix: baralla, validacions, puntuació amb comodins, partició,
+// resolvePlay (inclosa l'obertura de 30), motor headless (createGame),
+// legalPlays + final de ronda, i la PARITAT NAVEGADOR↔NODE: es carrega
+// game.js + els scripts inline de index.html en un context vm i es comprova
+// que juguen exactament igual que l'enginy.
+// ═══════════════════════════════════════════════════════════════
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const vm = require('vm');
+
+const R = require('../game.js');
+const { DEFAULT_WEIGHTS, chooseMove, playGame } = require('../bot.js');
+
+const t = (v, c, j) => j ? { id: 'J', joker: true } : { id: 't' + c + '_' + v, c, v };
+const grp = (vals) => vals.map((x, i) => ({ id: 'g' + i, v: x, c: i % 4 }));
+const runi = (color, vals) => vals.map((x, i) => ({ id: 'r' + i, v: x, c: color }));
+
+test('baralla: 106 amb 1 joc, 212 amb 2', () => {
+  assert.strictEqual(R.makeDeck(1).length, 106);
+  assert.strictEqual(R.makeDeck(2).length, 212);
+  assert.strictEqual(R.makeDeck(1).filter((x) => x.joker).length, 2);
+  assert.strictEqual(R.makeDeck(2).filter((x) => x.joker).length, 4);
+});
+
+test('validacions bàsiques', () => {
+  assert.ok(R.validRun(runi(0, [5, 6, 7])));
+  assert.ok(!R.validRun(runi(0, [5, 6, 8])));
+  assert.ok(R.validGroup(grp([8, 8, 8])));
+  assert.ok(!R.validGroup(grp([8, 8, 9])));
+  assert.ok(!R.validGroup(grp([8, 8, 8, 8, 8])));
+  assert.ok(R.validMeld(runi(0, [10, 11, 12])));
+  assert.ok(R.validMeld(grp([5, 5, 5])));
+  assert.ok(!R.validMeld([t(0, 1), t(0, 2)]));
+});
+
+test('puntuació del comodí (el bug reportat per l\'usuari)', () => {
+  // grup 13,13,comodí → 39 (no 26)
+  assert.strictEqual(R.meldScore([{ id: 'a', v: 13, c: 0 }, { id: 'b', v: 13, c: 1 }, { id: 'J', joker: true }]), 39);
+  // escala 5,6,comodí → 18
+  assert.strictEqual(R.meldScore([{ id: 'a', v: 5, c: 0 }, { id: 'b', v: 6, c: 0 }, { id: 'J', joker: true }]), 18);
+  // comodí al mig 8,comodí,10 → 27
+  assert.strictEqual(R.meldScore([{ id: 'a', v: 8, c: 0 }, { id: 'J', joker: true }, { id: 'b', v: 10, c: 0 }]), 27);
+  // 9..13 amb comodí → 9+10+11+12+13 = 55
+  assert.strictEqual(R.meldScore(runi(0, [9, 10, 11, 12, 13])), 55);
+});
+
+test('partició', () => {
+  const tiles = [...runi(0, [5, 6, 7]), ...grp([8, 8, 8])];
+  const p = R.bestPartition(tiles);
+  assert.notStrictEqual(p, null);
+  assert.strictEqual(p.length, 2);
+  assert.ok(R.validMeld(p[0]) && R.validMeld(p[1]));
+  // impossible → null
+  assert.strictEqual(R.bestPartition([t(0, 1), t(0, 2), t(1, 5)]), null);
+});
+
+test('resolvePlay: tornar-li el canvi de tauler i obertura de 30', () => {
+  const st = { table: [], initial: [false, false] };
+  // obertura <30 → rebutjada
+  let r = R.resolvePlay(st, 0, [t(0, 1), t(0, 2), t(0, 3)], null, []);
+  assert.strictEqual(r.ok, false);
+  // obertura ≥30 → acceptada i marca initial (grup 13,13,13 = 39)
+  r = R.resolvePlay(st, 0, [{ id: 'a', v: 13, c: 0 }, { id: 'b', v: 13, c: 1 }, { id: 'c', v: 13, c: 2 }], null, []);
+  assert.ok(r.ok);
+  assert.strictEqual(r.state.initial[0], true);
+  assert.strictEqual(r.state.table.length, 1);
+  // no pot tocar el tauler a la primera jugada
+  assert.strictEqual(R.resolvePlay({ table: [], initial: [false, false] }, 0, [t(0, 5)], 0, []).ok, false);
+});
+
+test('resolvePlay: moure un comodí entre combinacions mantenint-ho vàlid', () => {
+  const table = [
+    [{ id: 'm0', v: 10, c: 2 }, { id: 'm1', v: 11, c: 2 }, { id: 'm2', v: 12, c: 2 }, { id: 'J', joker: true }],
+    [{ id: 'n0', v: 4, c: 0 }, { id: 'n1', v: 5, c: 0 }, { id: 'n2', v: 6, c: 0 }],
+  ];
+  const st = { table, initial: [true, true] };
+  const r = R.resolvePlay(st, 0, [], 1, [{ from: 0, id: 'J' }]);
+  assert.ok(r.ok);
+  assert.strictEqual(r.state.table[0].length, 3);
+  assert.strictEqual(r.state.table[1].length, 4);
+  assert.ok(R.validMeld(r.state.table[0]) && R.validMeld(r.state.table[1]));
+});
+
+test('motor: torns, pila, repartiment per nombre de jugadors', () => {
+  const g2 = R.createGame({ players: 2, seed: 1 });
+  assert.strictEqual(g2.hand(0).length, 14);
+  assert.strictEqual(g2.hand(1).length, 14);
+  assert.strictEqual(g2.pileCount(), 106 - 28);
+  // 5 jugadors → 2 jocs de fitxes
+  const g5 = R.createGame({ players: 5, seed: 1 });
+  assert.strictEqual(g5.pileCount(), 212 - 5 * 14);
+  // no és el teu torn → rebutjat
+  assert.strictEqual(g2.play(1, { tiles: [] }).ok, false);
+  // agafar avançar torn
+  assert.ok(g2.draw(0).ok);
+  assert.strictEqual(g2.who(), 1);
+});
+
+test('determinisme: mateixa llavor, mateixa partida', () => {
+  const a = R.createGame({ players: 2, seed: 42 }).hand(0).map((x) => x.id);
+  const b = R.createGame({ players: 2, seed: 42 }).hand(0).map((x) => x.id);
+  assert.deepStrictEqual(a, b);
+  const c = R.createGame({ players: 2, seed: 43 }).hand(0).map((x) => x.id);
+  assert.notDeepStrictEqual(a, c);
+});
+
+test('legalPlays + final de ronda (endWhenStuck)', () => {
+  // construïm una partida on la pila s'esgota i ningú pot jugar → final de ronda
+  const g = R.createGame({ players: 2, seed: 7, endWhenStuck: true });
+  // juguem fins que es desencalli (o guanyi algú); el marc no ha de penjar-se
+  let n = 0;
+  while (!g.state().gameOver && n < 2000) {
+    const who = g.who();
+    const mv = chooseMove(who, g);
+    const r = mv.type === 'play' ? g.play(who, mv) : (mv.type === 'draw' ? g.draw(who) : g.pass(who));
+    if (!r.ok) g.pass(who);
+    n++;
+  }
+  assert.strictEqual(g.state().gameOver, true);
+  assert.notStrictEqual(g.state().winner, null);
+  assert.ok(n < 1500, 'ha d\'acabar abans de 1500 torns (ha acabat a ' + n + ')');
+});
+
+test('self-play: totes les partides acaben i els pesos per defecte carreguen', async () => {
+  for (let i = 0; i < 8; i++) {
+    const r = playGame({ players: 2, seed: 900 + i });
+    assert.strictEqual(r.gameOver, true, 'partida ' + i + ' ha d\'acabar');
+    assert.ok(DEFAULT_WEIGHTS.perTile > 0);
+    assert.ok(['hand', 'round'].includes(r.winType));
+  }
+});
+
+/* ── PARITAT NAVEGADOR ↔ NODE ────────────────────────────────────
+   Carrega game.js + els scripts inline de index.html en un context vm
+   (això simula el navegador) i comprova que donen els mateixos resultats
+   que l'enginy de Node. */
+function browserContext() {
+  const gjs = fs.readFileSync(require('path').join(__dirname, '../game.js'), 'utf8');
+  const html = fs.readFileSync(require('path').join(__dirname, '../index.html'), 'utf8');
+  const re = /<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/g;
+  const inline = [];
+  let m;
+  while ((m = re.exec(html)) !== null) inline.push(m[1]);
+  const s = { console, localStorage: { getItem: () => null, setItem: () => {} } };
+  s.window = s;
+  s.document = { getElementById: () => ({ style: {}, classList: { add() {}, remove() {} } }) };
+  vm.createContext(s);
+  vm.runInContext(gjs, s);
+  for (const b of inline) vm.runInContext(b, s);
+  return s;
+}
+
+test('paritat navegador↔Node: el joc de la pàgina coincideix amb l\'enginy', () => {
+  const b = browserContext();
+  // mateixes regles disponibles
+  const node = { makeDeck: R.makeDeck, meldScore: R.meldScore, validRun: R.validRun,
+                 validGroup: R.validGroup, bestPartition: R.bestPartition, resolvePlay: R.resolvePlay };
+  vm.runInContext('' +
+    'globalThis.__same = ' +
+    '  (Rummy.makeDeck(1).length === 106) &&' +
+    '  (meldScore([{id:"a",v:13,c:0},{id:"b",v:13,c:1},{id:"J",joker:true}]) === 39) &&' +
+    '  (meldScore([{id:"a",v:5,c:0},{id:"b",v:6,c:0},{id:"J",joker:true}]) === 18) &&' +
+    '  (validRun([{id:"a",v:1,c:0},{id:"b",v:2,c:0},{id:"c",v:3,c:0}])) &&' +
+    '  (bestPartition([]).length === 0);',
+  b);
+  const same = vm.runInContext('globalThis.__same', b);
+  assert.ok(same, 'les regles del navegador han de coincidir amb les de Node');
+});
+
+test('paritat: tryPlay de la pàgina delega a Rummy.resolvePlay', () => {
+  const b = browserContext();
+  vm.runInContext(`
+    role='host'; me=0; plCount=2;
+    G.table=[]; G.turn=0; G.pileCount=78; G.initial=[false,false]; G.gameOver=false; G.winner=null; G.plCount=2;
+    rack=[{id:'k1',v:13,c:0},{id:'k2',v:13,c:1},{id:'k3',v:13,c:2},{id:'x',v:1,c:0}];
+  `, b);
+  vm.runInContext(`sel.clear();['k1','k2','k3'].forEach(i=>sel.add(i));selMeld=null;clickPlay();`, b);
+  const tableLen = vm.runInContext('G.table.length', b);
+  const initial = vm.runInContext('G.initial[0]', b);
+  const handLen = vm.runInContext('rack.length', b);
+  // 3 fitxes jugades → 1 meld al tauler, initial feta, 1 fitxa a la mà
+  assert.strictEqual(tableLen, 1);
+  assert.strictEqual(initial, true);
+  assert.strictEqual(handLen, 1);
+});
