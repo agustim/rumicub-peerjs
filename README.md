@@ -109,7 +109,7 @@ miniPC de casa o a un VPS/servei gratuït:
 
 ```bash
 # Node ≥ 18
-npm install -g peerjs
+npm install -g peerjs-server
 peerjs --port 9000 --key peerjs
 ```
 
@@ -193,6 +193,7 @@ d'AI la fan servir amb `require('./game.js')`). Això garanteix que el bot juga
 
 ```bash
 npm install                 # devDeps: @playwright/test i peerjs-server
+npx playwright install chromium   # només la primera vegada (baixa el navegador per a l'E2E)
 npm run test:engine         # 12 proves del motor («node --test») — sense dependències
 npm run e2e                 # proves E2E al navegador real (requereixen 2 serveis locals)
 ```
