@@ -23,53 +23,73 @@ async function openPlayer(browser, viewport) {
   return { ctx, page };
 }
 
-/* Decideix el torn del jugador d'aquesta pàgina des del mateix codi de l'app.
-   Retorna: {turn} → no és el seu torn; {canOpen} → no pot fer 30; {done} → ja va obrir.
-   Busca un únic meld de 3-5 fitxes ≥ 30 (o la partició de la mà sencera si és petita). */
-async function openerPlan(page) {
+/* Una acció per al torn del jugador d'aquesta pàgina, a través de la lògica real
+   de l'app (selecció + clickPlay/clickDraw/clickPass). Totes les jugades es
+   validen PRIMER amb Rummy.resolvePlay (el mateix que fa servir l'amfitrió),
+   així que sempre s'accepten i no hi ha intents rebutjats en bucle.
+   Retorna què ha fet: {over} | {extended} | {opened} | {drew} | {passed}. */
+async function smartMove(page) {
   return page.evaluate(() => {
-    if (!myTurn()) return { turn: false };
-    if (G.initial[me]) return { done: true };
+    if (!myTurn() || G.gameOver) return { over: G.gameOver };
+    sel.clear(); selMeld = null;
     const t = rack;
-    for (let i = 0; i < t.length; i++)
-      for (let j = i + 1; j < t.length; j++)
-        for (let k = j + 1; k < t.length; k++) {
-          const s3 = [t[i], t[j], t[k]];
-          if (Rummy.validMeld(s3) && Rummy.meldScore(s3) >= 30) return { playIds: s3.map((x) => x.id), score: Rummy.meldScore(s3) };
-          for (let l = k + 1; l < t.length; l++) {
-            const s4 = [t[i], t[j], t[k], t[l]];
-            if (Rummy.validMeld(s4) && Rummy.meldScore(s4) >= 30) return { playIds: s4.map((x) => x.id), score: Rummy.meldScore(s4) };
-            for (let m = l + 1; m < t.length; m++) {
-              const s5 = [t[i], t[j], t[k], t[l], t[m]];
-              if (Rummy.validMeld(s5) && Rummy.meldScore(s5) >= 30) return { playIds: s5.map((x) => x.id), score: Rummy.meldScore(s5) };
-            }
+    const tryMove = (tiles, target) => {
+      const r = Rummy.resolvePlay({ table: G.table, initial: G.initial }, me, tiles, target, []);
+      if (!r.ok) return false;
+      tiles.forEach((x) => sel.add(x.id));
+      selMeld = target;
+      clickPlay();               // amfitrió: valida i aplica · convidat: envia al host
+      return true;
+    };
+    // enumera tots els subconjunts de mida k del raquis i crida fn per cadascun
+    const subsets = (k, fn) => {
+      const idx = Array(k);
+      const rec = (c) => {
+        if (c === k) { fn(idx.map((p) => t[p])); return; }
+        const start = c ? idx[c - 1] + 1 : 0;
+        const last = t.length - (k - c);
+        for (let i = start; i <= last; i++) { idx[c] = i; rec(c + 1); }
+      };
+      rec(0);
+    };
+
+    // 1) extensió de combinacions del tauler amb 1-2 fitxes de la mà
+    if (G.initial[me]) {
+      for (let mi = 0; mi < G.table.length; mi++) {
+        const base = G.table[mi];
+        for (let i = 0; i < t.length; i++) {
+          if (Rummy.validMeld([...base, t[i]]) && tryMove([t[i]], mi)) return { extended: 1 };
+          for (let j = i + 1; j < t.length; j++) {
+            if (Rummy.validMeld([...base, t[i], t[j]]) && tryMove([t[i], t[j]], mi)) return { extended: 2 };
           }
         }
-    // mà petita: pot ser que s'obri amb tota la mà dividida en vàries combinacions
-    if (t.length <= 8) {
-      const parts = Rummy.bestPartition(t);
-      if (parts) {
-        const sum = parts.reduce((a, m) => a + Rummy.meldScore(m), 0);
-        if (sum >= 30) return { playIds: t.map((x) => x.id), score: sum };
       }
     }
-    return { canOpen: false };
-  });
-}
 
-/* Juga un torn a través de la UI real (clicar fitxes + botó Jugar/Agafar). */
-async function takeTurn(page) {
-  const plan = await openerPlan(page);
-  if (plan.turn === false) return { skipped: true };      // NO és el seu torn
-  if (plan.done) return { done: true };
-  if (plan.playIds) {
-    await page.evaluate((ids) => ids.forEach((id) => clickTile(id)), plan.playIds);
-    await page.click('#btnPlay');
-    return { played: true, score: plan.score };
-  }
-  // és el seu torn però no pot fer 30: agafa de la pila
-  await page.click('#btnDraw');
-  return { drew: true };
+    // 2) meld NOU amb 3-5 fitxes de la mà (exigeix 30 punts només si encara no ha obert)
+    for (let k = 3; k <= 5; k++) {
+      let found = false;
+      subsets(k, (s) => {
+        if (found) return;
+        if (!Rummy.validMeld(s)) return;
+        if (G.initial[me] !== true && Rummy.meldScore(s) < 30) return;
+        if (tryMove(s, null)) found = true;
+      });
+      if (found) return G.initial[me] ? { newMeld: true } : { opened: true };
+    }
+    // 2b) tota la mà en vàries combinacions: necessita 30 si encara no ha obert
+    if (t.length > 0 && t.length <= 8) {
+      const parts = Rummy.bestPartition(t);
+      const sum = parts ? parts.reduce((a, m) => a + Rummy.meldScore(m), 0) : 0;
+      if (parts && (G.initial[me] || sum >= 30)) {
+        t.forEach((x) => sel.add(x.id)); selMeld = null; clickPlay(); return { openedAll: sum };
+      }
+    }
+
+    // 3) sense jugada: agafar de la pila si n'hi ha; si no, passar
+    if (G.pileCount > 0) { clickDraw(); return { drew: true }; }
+    clickPass(); return { passed: true };
+  });
 }
 
 async function tableCount(page) {
@@ -109,42 +129,46 @@ test('partida completa: amfitrió + convidat juguen i els taulells es sincronitz
     await expect(host.page.locator('#rack .tile')).toHaveCount(14, { timeout: 20000 });
     await expect(guest.page.locator('#rack .tile')).toHaveCount(14, { timeout: 20000 });
 
-    // 5) diversos torns a través de la UI fins que algú hagi posat 30 punts al tauler
+    // 5) simulació de partida real fins que algú guanyi (buit de mà) o un màxim de torns
     let guard = 0;
-    while ((await tableCount(host.page)) < 3 && guard < 10) {
-      const hp = await openerPlan(host.page);
-      if (hp.turn !== false) await takeTurn(host.page);
-      await host.page.waitForTimeout(400);                 // propagació a través de PeerJS
-      if ((await tableCount(guest.page)) !== (await tableCount(host.page))) {
-        // espera que el convidat rebi l'estat de l'amfitrió
-        await expect
-          .poll(async () => await tableCount(guest.page), { timeout: 15000 })
-          .toBe(await tableCount(host.page));
-      }
-      const gp = await openerPlan(guest.page);
-      if (gp.turn !== false) await takeTurn(guest.page);
-      await guest.page.waitForTimeout(400);
-      if ((await tableCount(host.page)) !== (await tableCount(guest.page))) {
-        await expect
-          .poll(async () => await tableCount(host.page), { timeout: 15000 })
-          .toBe(await tableCount(guest.page));
-      }
-      guard++;
+    for (; guard < 40; guard++) {
+      await smartMove(host.page);
+      await host.page.waitForTimeout(300);                 // propagació a través de PeerJS
+      if ((await tableCount(guest.page)) !== (await tableCount(host.page)))
+        await expect.poll(() => tableCount(guest.page), { timeout: 15000 }).toBe(await tableCount(host.page));
+      if (await host.page.evaluate(() => G.gameOver)) break;
+
+      await smartMove(guest.page);
+      await guest.page.waitForTimeout(300);
+      if ((await tableCount(host.page)) !== (await tableCount(guest.page)))
+        await expect.poll(() => tableCount(host.page), { timeout: 15000 }).toBe(await tableCount(guest.page));
+      if (await host.page.evaluate(() => G.gameOver)) break;
     }
 
-    // 6) els dos taulells mostren exactament el mateix joc
+    // 6) els dos taulells mostren exactament el mateix joc i algú ha obert
     const hostN = await tableCount(host.page);
     const guestN = await tableCount(guest.page);
     expect(guestN).toBe(hostN);
     expect(hostN).toBeGreaterThanOrEqual(3);   // algú ha plantat 30 punts
-    console.log(`\n  ✅  taulell sincronitzat: ${hostN} fitxes visibles per als dos jugadors`);
+    const outcome = await host.page.evaluate(() => ({
+      over: G.gameOver, winner: G.winner, pile: G.pileCount, hostRack: rack.length,
+    }));
+    if (outcome.over)
+      console.log(`\n  🏁  Simulació: ha guanyat el Jugador ${outcome.winner + 1} perquè s'ha quedat sense fitxes (després de ${guard} torns). Tauler: ${hostN} fitxes · pila: ${outcome.pile}`);
+    else if (outcome.pile === 0)
+      console.log(`\n  ⏸  Simulació de ${guard} torns sense guanyador i pila esgotada → els jugadors passen (el joc no s'acaba per punts, tal com vols) · Tauler: ${hostN} fitxes · raquis de l'amfitrió: ${outcome.hostRack}`);
+    else
+      console.log(`\n  ⏸  Simulació de ${guard} torns sense guanyador → al joc real la partida continua fins que algú buidi la mà · Tauler: ${hostN} fitxes · pila: ${outcome.pile}`);
+    console.log(`  ✅  taulell sincronitzat: ambdós veuen exactament el mateix joc (${hostN} fitxes)`);
 
-    // 7) disseny mòbil aplicat al convidat (fitxes del raquis compactes)
-    const tileBox = await guest.page.locator('#rack .tile').first().boundingBox();
+    // 7) disseny mòbil aplicat al convidat (fitxa compacta; si el raquis és buit, es mira una del tauler)
+    const guestRack = guest.page.locator('#rack .tile');
+    const loc = (await guestRack.count()) > 0 ? guestRack.first() : guest.page.locator('#table .tile').first();
+    const tileBox = await loc.boundingBox();
     expect(tileBox).not.toBeNull();
     expect(tileBox.width).toBeLessThan(40);      // 33px per la media query ≤520px
     expect(tileBox.height).toBeLessThan(52);     // 47px
-    console.log(`  ✅  disseny mòbil: fitxa del raquis ${tileBox.width.toFixed(0)}×${tileBox.height.toFixed(0)}px al convidat`);
+    console.log(`  ✅  disseny mòbil: fitxa ${tileBox.width.toFixed(0)}×${tileBox.height.toFixed(0)}px al convidat`);
   } finally {
     await host.ctx.close();
     await guest.ctx.close();
